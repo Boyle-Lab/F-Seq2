@@ -30,3 +30,8 @@ optional arguments:
   -t T        threshold (standard deviations) (default=4.0)
   -v          verbose output
   ```
+Example  
+```
+python3 fseq.py Duke_GM12878_Chr21.bed Duke_GM12878_Chr22.bed -bf wgEncodeDukeMapabilityUniqueness20bp.bigWig -f 0 -v
+```
+example input data is available [here](https://www.dropbox.com/sh/1g12t8qkxgs0psx/AABKzAY-EcSXFwfo6Q0cSa1la?dl=0)
