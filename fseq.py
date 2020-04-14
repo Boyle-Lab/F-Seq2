@@ -19,6 +19,8 @@ import pyBigWig
 from itertools import chain
 import multiprocessing as mp
 import time
+import math
+import os
 
 
 def calculate_fragment_size(cuts_df, verbose=False):
@@ -45,13 +47,16 @@ def calculate_fragment_size(cuts_df, verbose=False):
     neg_strand_ls = (cuts_df_mod['strand'] == '-').values
 
     if verbose:
-        print('Calculating fragment size (this may take a long time, specify -f 0 if using DNase HS data) ...',
+        print('Calculating fragment size (this may take ~ 3 min, specify -f 0 if using DNase HS data) ...',
               flush=True)
 
     fragment_size = int(np.median(np.concatenate([cuts_ls[(cuts_ls > (current_cuts - max_range + prior)) &
                                                           (cuts_ls < (current_cuts + max_range + prior)) &
                                                           neg_strand_ls] - current_cuts
                                                   for current_cuts in pos_cuts_ls], axis=0)))
+    # todo:
+    #   1. can speed up by multiprocessing
+    #   2. consider use filter() to speed up
 
     if verbose:
         print('Done!', flush=True)
@@ -67,18 +72,28 @@ def calculate_bandwidth(feature_length):
     return bandwidth
 
 
-def calculate_threshold(size, ncuts, std, window_size=int(2860/2)):
+def calculate_threshold(size, ncuts, std, bandwidth):
     """Calculate threshold for peak calling.
 
     Input:
         size: sum range of cuts across all chroms in bp
         ncuts: total number of cuts
         std: standard deviation for calculating threshold
-        window_size: window size in bp
+        window_size: window size in bp, window_size = int(2860/2) when bandwidth = 100
 
     Return:
         threshold: threshold for peak calling
     """
+    # calculate window_size
+    window_size = 1400.0; java_min_value = 2 ** (-149)
+    while True:
+        window_size += 1
+        x = window_size / bandwidth
+        v = math.exp(-(x * x) / 2) / math.sqrt(math.pi * 2)
+        if v < java_min_value:
+            break
+    window_size = int(window_size - 1)
+
     total_window = 1 + window_size * 2
     cut_density = int((ncuts / size) * total_window)
     threshold_iterations = 10000
@@ -100,7 +115,7 @@ def calculate_threshold(size, ncuts, std, window_size=int(2860/2)):
     return threshold
 
 
-def run_kde(cuts_df, chrom, bf, pf, fragment_offset, bandwidth, verbose=False):
+def run_kde(cuts_df, chrom, bf, pf, fragment_offset, bandwidth, ncuts, verbose=False):
     """Estimate KDE.
 
     Return:
@@ -115,8 +130,11 @@ def run_kde(cuts_df, chrom, bf, pf, fragment_offset, bandwidth, verbose=False):
                  for start, duplicate in zip(np.unique(cuts_df['start'].values),
                                              cuts_df.groupby('start')['start'].count().values)])))
             # bigwig is 0-index, wig is 1-index
-        background_bw_weights[background_bw_weights == 0] = 1 / 5
-        background_bw_weights = 1 / background_bw_weights
+        # 1/background_bw_weights except 0 which remains 0
+        background_bw_weights = np.divide(np.ones(background_bw_weights.shape[0]), background_bw_weights,
+                                          out=np.zeros_like(background_bw_weights), where=(background_bw_weights != 0))
+        #background_bw_weights[background_bw_weights == 0] = 1 / 5
+        #background_bw_weights = 1 / background_bw_weights
     if pf:
         with pyBigWig.open(pf) as ploidy_bw:
             ploidy_bw_weights = np.array(list(chain.from_iterable(
@@ -130,40 +148,56 @@ def run_kde(cuts_df, chrom, bf, pf, fragment_offset, bandwidth, verbose=False):
     elif bf:
         weights = background_bw_weights
     elif pf:
-        weights = ploidy_bw_weights
+        weights = 1 / ploidy_bw_weights
     else:
         weights = np.ones(cuts_df.shape[0])
 
     cuts = cuts_df['cuts'].values
-    first_cut = cuts[0]
-    last_cut = cuts[-1]
+    first_cut = cuts.min()
+    last_cut = cuts.max()
     if fragment_offset == 0:
         kdepy_kde = KDEpy.FFTKDE(bw=bandwidth).fit(cuts, weights=weights)
-        kdepy_result = kdepy_kde.evaluate(np.arange(first_cut - 1, last_cut + 2))[1:-2]
-        kdepy_result = (kdepy_result * 20000000) / ncuts * (weights.sum())
+        kdepy_result = kdepy_kde.evaluate(np.arange(first_cut - 1, last_cut + 2))[1:-2].astype(np.float16)
+        #kdepy_result = (kdepy_result * 20000000) / ncuts * (weights.sum())
     else:
         cuts_w_offset = ((cuts_df['start'] + fragment_offset) * (cuts_df['strand'] == '+') +
                          (cuts_df['end'] - fragment_offset) * (cuts_df['strand'] == '-')).astype('int').values
-        kde_evaluation_start = min(cuts_w_offset[0], first_cut); kde_evaluation_end = max(cuts_w_offset[-1], last_cut)
-        assert (first_cut - kde_evaluation_start) >= 0
+        kde_evaluation_start = min(cuts_w_offset.min(), first_cut); kde_evaluation_end = max(cuts_w_offset.max(), last_cut)
+        #assert (first_cut - kde_evaluation_start) >= 0
         kdepy_kde = KDEpy.FFTKDE(bw=bandwidth).fit(cuts_w_offset, weights=weights)
-        kdepy_result = kdepy_kde.evaluate(np.arange(kde_evaluation_start - 1, kde_evaluation_end + 2))[1:-2]
+        try:
+            kdepy_result = kdepy_kde.evaluate(np.arange(kde_evaluation_start - 1, kde_evaluation_end + 2))[1:-2].astype(np.float16)
+        except:
+            np.fft.restore_all() # if encounter the bug for MLK https://github.com/IntelPython/mkl_fft/issues/24
+            kdepy_result = kdepy_kde.evaluate(np.arange(kde_evaluation_start - 1, kde_evaluation_end + 2))[1:-2].astype(np.float16)
         kdepy_result = kdepy_result[(first_cut - kde_evaluation_start):(last_cut - kde_evaluation_start)]
-        kdepy_result = (kdepy_result * 20000000) / ncuts * (weights.sum()) / 2
+        #kdepy_result = (kdepy_result * 20000000) / ncuts * (weights.sum()) / 2
         # this scaling is simulating results with offset (left window positive cuts and right window negative cuts) by
         # multiplying all signal with 0.5
+    kdepy_result = (kdepy_result * 20000000) / ncuts * (weights.sum()) # lets use all reads, more related to threshold
     end_time = time.time()
 
     if verbose:
-        print(f'{chrom}: first={first_cut}, last={last_cut}', flush=True)
-        print(f'{chrom}: Completed in {end_time - start_time:.3f} seconds.', flush=True)
-        print('-------------------------------------')
+        print(f'{chrom}: first={first_cut}, last={last_cut} \n'
+              f'{chrom}: Completed in {end_time - start_time:.3f} seconds. \n'
+              f'------------------------------------- \n', flush=True)
 
     # todo:
     #   1. F-seq 1.85 timing includes output wig. Output bw takes longer time and we do not measure it here.
     #   We also need to measure the time for calling peaks.
 
     return [chrom, first_cut, kdepy_result]
+
+def chrom_sizes_reader(file_name):
+    """ Chromosome size reader, used for genearating bigwig file.
+
+    """
+    chr_size_dic = {}
+    with open(file_name) as f:
+        for line in f:
+            (key, val) = line.split()
+            chr_size_dic[key] = int(val)
+    return chr_size_dic
 
 
 if __name__ == '__main__':
@@ -184,14 +218,13 @@ if __name__ == '__main__':
     parser.add_argument('-s', help='wiggle track step (default=1)', default=1, type=int)
     parser.add_argument('-t', help='threshold (standard deviations) (default=4.0)', default=4.0, type=float)
     parser.add_argument('-v', help='verbose output', default=False, action='store_true')
+    parser.add_argument('-cpus', help='number of cpus to use (default=min(unique_chrs, all-2))', default=False, type=int)
+    # related to output
+    parser.add_argument('-cs', help='chromosome size file, used for generating bigwig file (default=hg19)', default='hg19')
+    parser.add_argument('-name', help='prefix for output files (default=fseq_run)', default='fseq_run')
 
     args = parser.parse_args()
 
-    CHR_SIZE_DIC = {'chr1': 249250621, 'chr2': 243199373, 'chr3': 198022430, 'chr4': 191154276, 'chr5': 180915260,
-                    'chr6': 171115067, 'chr7': 159138663, 'chr8': 146364022, 'chr9': 141213431, 'chr10': 135534747,
-                    'chr11': 135006516, 'chr12': 133851895, 'chr13': 115169878, 'chr14': 107349540, 'chr15': 102531392,
-                    'chr16': 90354753, 'chr17': 81195210, 'chr18': 78077248, 'chr19': 59128983, 'chr20': 63025520,
-                    'chr21': 48129895, 'chr22': 51304566, 'chrX': 155270560, 'chrY': 59373566}  # hg19
 
     ### 1. Read in input files ###
     if args.input_file[0][-3:] == 'bam':
@@ -211,6 +244,7 @@ if __name__ == '__main__':
     #  2. check strand implicitly later
     #  3. maybe use dask to speed up calculations on dataframe, and solve if dataframe not fit in memory
     #  4. chrom size input for other genome build; this is only needed for bigwig output
+    #  5. maybe only save useful info in np array to avoid memory issue, and not using dask
 
 
     ### 2. Set up all parameters ###
@@ -224,7 +258,8 @@ if __name__ == '__main__':
     bandwidth = calculate_bandwidth(feature_length)
     sequence_length = input_bed.iloc[0, 2] - input_bed.iloc[0, 1]
     ncuts = input_bed.shape[0]
-    threshold = calculate_threshold(size=input_bed.groupby('chrom')['cuts'].agg(np.ptp).sum(), ncuts=ncuts, std=args.t)
+    threshold = calculate_threshold(size=input_bed.groupby('chrom')['cuts'].agg(np.ptp).sum(), ncuts=ncuts,
+                                    std=args.t, bandwidth=bandwidth)
 
     if args.v:
         print('=====================================', flush=True)
@@ -239,26 +274,63 @@ if __name__ == '__main__':
 
     # TODO:
     #   1. check if sequence(read)_length consistent
+    #   2. both signal and background normalize using total number of cuts, be aware
 
 
     ### 3. Parallel kde
     chrom_ls = input_bed['chrom'].unique()
     input_param_ls = [[input_bed[input_bed['chrom'] == chrom]] + [chrom, args.bf, args.pf, fragment_offset, bandwidth,
-                                                                  args.v] for chrom in chrom_ls]
-    cpus = min(chrom_ls.shape[0], mp.cpu_count() - 2)
+                                                                  ncuts, args.v] for chrom in chrom_ls]
+    if not args.cpus:
+        cpus = min(chrom_ls.shape[0], mp.cpu_count() - 2)
+    else:
+        cpus = args.cpus
 
     with mp.Pool(processes=cpus) as pool:
         results = pool.starmap(run_kde, input_param_ls)
 
 
     ### 4. Output results
-    for result in results:
-        with pyBigWig.open(args.o+'/'+result[0]+'.bw', 'w') as output_bw:
-            output_bw.addHeader([(result[0], CHR_SIZE_DIC[result[0]])])
+    #for result in results:
+        #with pyBigWig.open(args.o+'/'+result[0]+'.bw', 'w') as output_bw:
+            #output_bw.addHeader([(result[0], CHR_SIZE_DIC[result[0]])])
+            #output_bw.addEntries(result[0], result[1], values=result[2], span=1, step=1)
+
+    if args.cs == 'hg19':
+        chr_size_dic = {'chr1': 249250621, 'chr2': 243199373, 'chr3': 198022430, 'chr4': 191154276, 'chr5': 180915260,
+                        'chr6': 171115067, 'chr7': 159138663, 'chr8': 146364022, 'chr9': 141213431, 'chr10': 135534747,
+                        'chr11': 135006516, 'chr12': 133851895, 'chr13': 115169878, 'chr14': 107349540, 'chr15': 102531392,
+                        'chr16': 90354753, 'chr17': 81195210, 'chr18': 78077248, 'chr19': 59128983, 'chr20': 63025520,
+                        'chr21': 48129895, 'chr22': 51304566, 'chrX': 155270560, 'chrY': 59373566}  # hg19
+    else:
+        chr_size_dic = chrom_sizes_reader(args.cs)
+
+    # deal with output file name to avoid overwrite
+    if args.name == 'fseq_run':
+        run_num = 1
+        while os.path.exists(f'{args.o}/fseq_run_{run_num}.bw'):
+            run_num += 1
+        output_file = f'{args.o}/fseq_run_{run_num}.bw'
+    else:
+        if not os.path.exists(f'{args.o}/{args.name}.bw'):
+            output_file = f'{args.o}/{args.name}.bw'
+        else:
+            run_num = 1
+            while os.path.exists(f'{args.o}/{args.name}_{run_num}.bw'):
+                run_num+=1
+            output_file = f'{args.o}/{args.name}_{run_num}.bw'
+
+    with pyBigWig.open(output_file, 'w') as output_bw:
+        output_bw.addHeader([(result[0], chr_size_dic[result[0]]) for result in results])
+        for result in results:
             output_bw.addEntries(result[0], result[1], values=result[2], span=1, step=1)
+
+
     if args.v:
         print('Thank you for using F-seq.')
 
     # TODO:
     #   1. specify step
-    #   2. avoid overwrite files
+    #   2. avoid overwrite files (done)
+    #   3. output name and in one file instead of separated by chrom (done)
+    #   4. more chrom sizes included, such as hg38
