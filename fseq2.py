@@ -25,22 +25,62 @@ from statsmodels.stats.multitest import multipletests
 import os
 
 
-def read_in_file(file_name):
+def read_in_file(file_name, pe, pe_fragment_size_range, chrom_file):
     """ Read in file(s).
     """
-    if file_name[0][-3:] == 'bam':
-        bed = pd.concat([pybedtools.BedTool(file).bam_to_bed().to_dataframe() for file in file_name],
-                              axis=0)
-    elif file_name[0][-3:] == 'bed':
-        bed = pd.concat(map(functools.partial(pd.read_csv, sep='\t', header=None), file_name),
-                              axis=0).rename(columns={0:'chrom', 1:'start', 2:'end', 3: 'name', 4: 'score', 5:'strand'})
-    else:
-        sys.exit('Error: Input file format should be either ended with .bam or .bed, please convert files and try again.')
-    bed = bed.drop(['name', 'score'], axis=1)
-    bed['cuts'] = bed['start'] * (bed['strand'] == '+') + \
-                        bed['end'] * (bed['strand'] == '-')
+    if not pe:
+        if file_name[0][-3:] == 'bam':
+            bed = pd.concat([pybedtools.BedTool(file).bam_to_bed().to_dataframe() for file in file_name],
+                                  axis=0)
+        elif file_name[0][-3:] == 'bed':
+            bed = pd.concat(map(functools.partial(pd.read_csv, sep='\t', header=None), file_name),
+                                  axis=0).rename(columns={0:'chrom', 1:'start', 2:'end', 3: 'name', 4: 'score', 5:'strand'})
+        else:
+            sys.exit('Error: Input file format should be either ended with .bam or .bed, please convert files and try again.')
+        bed = bed.drop(['name', 'score'], axis=1)
+        bed['cuts'] = bed['start'] * (bed['strand'] == '+') + \
+                            bed['end'] * (bed['strand'] == '-')
+        fragment_size_before_filter = np.NaN
+        fragment_size_after_filter = np.NaN
 
-    return bed
+    else:
+        if file_name[0][-3:] == 'bam':
+            bed = pd.concat([pybedtools.BedTool(file).bam_to_bed(bedpe=True, mate1=True).to_dataframe() for file in file_name], axis=0)
+        elif file_name[0][-3:] == 'bed':
+            bed = pd.concat(map(functools.partial(pd.read_csv, sep='\t', header=None), file_name), axis=0).rename(
+                columns={0:'chrom', 1:'start', 2:'end', 4: 'score', 5:'strand'})
+        else:
+            sys.exit('Error: Input file format should be either ended with .bam or .bed, please convert files and try again.')
+        bed['start_new'] = (bed[['start', 'score']]).min(axis=1)
+        bed['end_new'] = (bed[['end', 'strand']]).max(axis=1)
+        try:
+            bed['cuts'] = ((bed['start_new'] + bed['end_new']) / 2).astype(np.int32)
+        except TypeError:
+            bed = bed.loc[(bed['strand'] != -1) & (bed['start'] != -1), :].astype(
+                {'start_new': np.int32, 'end_new': np.int32})
+            bed['cuts'] = ((bed['start_new'] + bed['end_new']) / 2).astype(np.int32)
+        bed['strand'] = '.'
+        bed = bed.loc[:, ['chrom', 'start_new', 'end_new', 'strand', 'cuts']]
+        bed.rename(columns={'start_new': 'start', 'end_new': 'end'}, inplace=True)
+        fragment_size_before_filter = (bed['end'] - bed['start']).mean()
+        if pe_fragment_size_range[0] != 'False':
+            if pe_fragment_size_range[1] != 'inf':
+                bed = bed.loc[((bed['end'] - bed['start']) >= pe_fragment_size_range[0]) &
+                              ((bed['end'] - bed['start']) <= pe_fragment_size_range[1]), :]
+            else:
+                bed = bed.loc[((bed['end'] - bed['start']) >= pe_fragment_size_range[0]), :]
+        fragment_size_after_filter = (bed['end'] - bed['start']).mean()
+
+    if chrom_file:
+         chrom_ls_to_process = read_chrom_file(chrom_file)
+         bed = bed.loc[bed['chrom'].isin(chrom_ls_to_process)]
+
+    # TODO:
+    #   1. make sure pe reads on the same chrom
+    #   2. samtools sort -n in.bam -o out.bam <= bedtools -BEDPE requires bam sorted by name
+
+    return bed, [fragment_size_before_filter, fragment_size_after_filter]
+
 
 
 def calculate_fragment_size(cuts_df, verbose=False):
@@ -206,7 +246,10 @@ def run_kde(cuts_df, cuts_df_control, chrom,
 
 
     ### 4. calculate q value ###
-    summit_abs_pos_array = result_df['summit'].values - first_cut
+    try:
+        summit_abs_pos_array = result_df['summit'].values - first_cut
+    except KeyError:
+        return pd.DataFrame() # no peaks called
 
     # calculate query value array and lambda background
     lambda_bg, query_value = prepare_stats_test(result_df=result_df, kdepy_result=kdepy_result,
@@ -297,7 +340,10 @@ def run_kde_wo_control(cuts_df, chrom,
 
 
     ### 4. calculate q value ###
-    summit_abs_pos_array = result_df['summit'].values - first_cut
+    try:
+        summit_abs_pos_array = result_df['summit'].values - first_cut
+    except KeyError:
+        return pd.DataFrame() # no peaks called
 
     # calculate query value array and lambda background
     lambda_bg, query_value = prepare_stats_test(result_df=result_df, kdepy_result=kdepy_result,
@@ -350,7 +396,11 @@ def calculate_kde(cuts_df, weights, fragment_offset, bandwidth, num_cuts=False):
     last_cut = cuts.max()
     if fragment_offset == 0:
         kdepy_kde = KDEpy.FFTKDE(bw=bandwidth).fit(cuts, weights=weights)
-        kdepy_result = kdepy_kde.evaluate(np.arange(first_cut - 1, last_cut + 2))[1:-2]
+        try:
+            kdepy_result = kdepy_kde.evaluate(np.arange(first_cut - 1, last_cut + 2))[1:-2]
+        except ValueError:
+            np.fft.restore_all()  # if encounter the bug for MLK https://github.com/IntelPython/mkl_fft/issues/24
+            kdepy_result = kdepy_kde.evaluate(np.arange(first_cut - 1, last_cut + 2))[1:-2]
         # kdepy_result = (kdepy_result * 20000000) / ncuts * (weights.sum())
     else:
         cuts_w_offset = ((cuts_df['start'] + fragment_offset) * (cuts_df['strand'] == '+') +
@@ -361,7 +411,7 @@ def calculate_kde(cuts_df, weights, fragment_offset, bandwidth, num_cuts=False):
         kdepy_kde = KDEpy.FFTKDE(bw=bandwidth).fit(cuts_w_offset, weights=weights)
         try:
             kdepy_result = kdepy_kde.evaluate(np.arange(kde_evaluation_start - 1, kde_evaluation_end + 2))[1:-2]
-        except:
+        except ValueError:
             np.fft.restore_all()  # if encounter the bug for MLK https://github.com/IntelPython/mkl_fft/issues/24
             kdepy_result = kdepy_kde.evaluate(np.arange(kde_evaluation_start - 1, kde_evaluation_end + 2))[1:-2]
         kdepy_result = kdepy_result[(first_cut - kde_evaluation_start):(last_cut - kde_evaluation_start)]
@@ -441,7 +491,11 @@ def call_peaks(chrom, first_cut, kdepy_result, min_height, min_prominence=None, 
     Return:
         peak_regions: (pd.DataFrame) [chr, start, end, summit, signal]
     """
-    peak_regions = find_contiguous_regions(kdepy_result >= min_height)
+    try:
+        peak_regions = find_contiguous_regions(kdepy_result >= min_height)
+    except IndexError:
+        print(f'no peaks find on {chrom}')
+        return pd.DataFrame()
     peak_indexes, properties = find_peaks(kdepy_result, height=min_height, distance=min_distance,
                                           prominence=min_prominence)
     peak_regions = pd.concat([pd.Series([chrom] * peak_regions.shape[0], name='chrom'),
@@ -457,8 +511,12 @@ def call_peaks(chrom, first_cut, kdepy_result, min_height, min_prominence=None, 
     peak_indexes['end'] += first_cut
     peak_regions = pybedtools.BedTool.from_dataframe(peak_regions)
     peak_indexes = pybedtools.BedTool.from_dataframe(peak_indexes)
-    peak_regions = peak_regions.intersect(peak_indexes, wa=True, wb=True).merge(c=[5, 7, 8], o='collapse',
-                                                                                d=merge_peak_distance).to_dataframe()  # change
+    try:
+        peak_regions = peak_regions.intersect(peak_indexes, wa=True, wb=True).merge(c=[5, 7, 8], o='collapse',
+                                                                                    d=merge_peak_distance).to_dataframe()  # change
+    except pybedtools.helpers.BEDToolsError:
+        print(f'no peaks find on {chrom}')
+        return pd.DataFrame()
 
     peak_regions = peak_regions[peak_regions['end'] - peak_regions['start'] >= min_peak_len].copy()
     # print(peak_regions)
@@ -631,7 +689,7 @@ def extract_value_around_window(result_sig, summit_abs_pos_array, window_length,
 
 def find_local_lambda(control_np_tmp, control_np_tmp_name, summit_abs_pos_array, lambda_bg, window_size, use_max=False):
     """Find local lambda.
-    Memory intensive.
+    Memory heavy.
 
     Return:
         lambda_local: (np.array) max lambda for each summit
@@ -788,22 +846,30 @@ def calculate_lambda_bg_lower_bound(bandwidth_control, ncuts_treatment, ncuts_co
     return stats.norm(0, bandwidth_control).pdf(0) * pseudo_count / ncuts_control * ncuts_treatment
 
 
+def read_chrom_file(file_name):
+    with open(file_name, 'r') as file:
+        chrom_ls_to_process = [line.strip() for line in file]
+    return chrom_ls_to_process
+
+
 if __name__ == '__main__':
     ### 1. user setting ###
     parser = argparse.ArgumentParser(
         description='This command executes fseq which is a feature density estimator for high-throughput sequence tags')
 
-    parser.add_argument('input_file', help='treatment file(s) in bam or bed format. If multiple files, separate '
+    parser.add_argument('treatment_file', help='treatment file(s) in bam or bed format. If multiple files, separate '
                                            'by space; if one file, it can contain all chromosomes', nargs='+')
-    parser.add_argument('-f', help="fragment size of treatment (default=estimated from data). For DNase HS data (5' ends)"
-                                   " set -f 0", default=False, type=int)
-    parser.add_argument('-l', help='feature length of treatment (default=600 for DNase, '
+    parser.add_argument('-f', help="fragment size of treatment (default=estimated from data). Determine shift size (offset=fragment_size/2)."
+                                   "For DNase-seq and ATAC-seq data (5' ends) set -f 0. Paired-end fragment size stats "
+                                   "report separately.", default=False, type=int)
+    parser.add_argument('-l', help='feature length of treatment (default=600 for DNase-seq and ATAC-seq, '
                                    'recommend 50 for narrow ChIP-seq, 1000 for broad ChIP-seq)', default=600, type=int)
 
     parser.add_argument('-control_file', help='control file(s) in bam or bed format. If multiple files, separate '
                                            'by space; if one file, it can contain all chromosomes', nargs='+')
-    parser.add_argument('-fc', help="fragment size of control (default=estimated from data). For DNase HS data (5' ends)"
-                                   " set -f 0", default=False, type=int)
+    parser.add_argument('-fc', help="fragment size of control (default=estimated from data). Determine shift size (offset=fragment_size/2)."
+                                   "For DNase-seq and ATAC-seq data (5' ends) set -f 0. Paired-end fragment size stats "
+                                    "report separately.", default=False, type=int)
     #parser.add_argument('-lc', help='feature length of control (default=12000)', default=12000, type=int)
 
     parser.add_argument('-t', help='threshold (standard deviations) (default=4.0 for broad peaks,'
@@ -812,16 +878,35 @@ if __name__ == '__main__':
     parser.add_argument('-cpus', help='number of cpus to use (default=min(unique_chrs, all-2))', default=False,
                         type=int)
     parser.add_argument('-o', help='output directory (default=current directory)')
-    parser.add_argument('-name', help='prefix for output files (default=fseq_run)', default='fseq_run')
+    parser.add_argument('-name', help='prefix for output files (default=fseq2_run)', default='fseq2_run')
+    parser.add_argument('-pe', help='Paired-end mode. Treatment_file (and control_file) are paired-end bam or bed '
+                                    '(BAMPE or BEDPE). Requires bam is sorted by name (samtools sort -n in.bam -o out.bam). '
+                                    'Use fragment size info in paired-end data to select fragment. Default all files are '
+                                    'processed as single-end. Notice it overrides -f and sets it to 0.', default=False,
+                        action='store_true')
+    parser.add_argument('-nfr_upper_limit', help='Nucleosome free region upper limit. Default is 150 bp. Used as '
+                                                 'window_size and min_distance when fragment size (-f) set to 0.',
+                        default=150, type=int)
+    parser.add_argument('-pe_fragment_size_range', help='Only keep paired-end fragments whose size within the range. '
+                                                        'Default is to select nucleosome free regions for ATAC-seq data, '
+                                                        'i.e. [0, 150]. To call peaks on nucleosome centers, specify: '
+                                                        '150 inf. Keep all, no filtering specify: False',
+                        nargs='+', default=[0, 150])
+    parser.add_argument('-chrom_file', help='A file specify the chroms to process. Discard reads on other chroms. '
+                                            'Default is False (process all). Each chrom for each line in file.',
+                        default=False)
+
     args = parser.parse_args()
 
 
     ### 2. deal with input (treatment) ###
-    input_bed = read_in_file(args.input_file)
+    input_bed, fragment_size_ls = read_in_file(args.treatment_file, args.pe, args.pe_fragment_size_range, args.chrom_file)
 
     # parameters for input
     feature_length = args.l
-    if args.f is False:
+    if args.pe:
+        fragment_size = 0
+    elif args.f is False:
         fragment_size = calculate_fragment_size(
             input_bed[input_bed['chrom'] == input_bed.groupby('chrom')['chrom'].count().idxmax()], verbose=args.v)
     else:
@@ -837,11 +922,13 @@ if __name__ == '__main__':
 
     ### 3. deal with control ###
     if args.control_file:
-        control_bed = read_in_file(args.control_file)
+        control_bed, fragment_size_ls_control = read_in_file(args.control_file, args.pe, args.pe_fragment_size_range, args.chrom_file)
 
         # parameters for control
         feature_length_control = feature_length * 20
-        if args.fc is False:
+        if args.pe:
+            fragment_size_control = 0
+        elif args.fc is False:
             fragment_size_control = calculate_fragment_size(
                 control_bed[control_bed['chrom'] == control_bed.groupby('chrom')['chrom'].count().idxmax()], verbose=args.v)
         else:
@@ -854,9 +941,11 @@ if __name__ == '__main__':
                                         #std=args.t, bandwidth=bandwidth_control)
         sequence_length_control = control_bed.iloc[0, 2] - control_bed.iloc[0, 1]
 
-        if (args.control_file[0][-3:] == 'bam') and (args.input_file[0][-3:] == 'bam'):
-            assert control_bed.iloc[-1, 0] == input_bed.iloc[-1, 0], "pybedtools incomplete write-in error, " \
+        if (args.control_file[0][-3:] == 'bam') and (args.treatment_file[0][-3:] == 'bam'):
+            assert input_bed.iloc[-1, 0] in control_bed.iloc[:, 0].values, "pybedtools incomplete write-in error, " \
                                                                      "please free memory and try again."
+            #assert control_bed.iloc[-1, 0] == input_bed.iloc[-1, 0], "pybedtools incomplete write-in error, " \
+                                                                     #"please free memory and try again."
 
     # general parameters
     scaling_factor = feature_length * 20 / 50
@@ -875,8 +964,12 @@ if __name__ == '__main__':
                                                                 #pseudo_count=1)
     lambda_bg_lower_bound *= scaling_factor
     min_prominence = threshold # 0.001
-    min_distance = fragment_size
-    window_size = fragment_size
+    if fragment_size == 0:
+        min_distance = args.nfr_upper_limit
+        window_size = args.nfr_upper_limit
+    else:
+        min_distance = fragment_size
+        window_size = fragment_size
     distribution_name = 'poisson'
 
 
@@ -889,12 +982,18 @@ if __name__ == '__main__':
         print(f'\tthreshold = {threshold:.3f}', flush=True)
         print(f'\tlambda bg lower bound = {lambda_bg_lower_bound:.3f}', flush=True)
         print(f'\test. fragment size = {fragment_size}', flush=True)
+        if args.pe:
+            print(f'\tavg. pe fragment size before filter = {fragment_size_ls[0]}', flush=True)
+            print(f'\tavg. pe fragment size after filter = {fragment_size_ls[1]}', flush=True)
         print(f'\tsequence length = {sequence_length}', flush=True)
         print(f'\ttotal cuts = {ncuts}', flush=True)
         print('-------------------------------------', flush=True)
         if args.control_file:
             print(f'\tcontrol bandwidth = {bandwidth_control}', flush=True)
             print(f'\tcontrol est. fragment size = {fragment_size_control}', flush=True)
+            if args.pe:
+                print(f'\tcontrol avg. pe fragment size before filter = {fragment_size_ls_control[0]}', flush=True)
+                print(f'\tcontrol avg. pe fragment size after filter = {fragment_size_ls_control[1]}', flush=True)
             print(f'\tcontrol sequence length = {sequence_length_control}', flush=True)
             print(f'\tcontrol total cuts = {ncuts_control}', flush=True)
             print('-------------------------------------', flush=True)
