@@ -1,0 +1,392 @@
+#!/usr/bin/env python
+
+"""F-Seq Version2 main script.
+
+"""
+
+import argparse
+import os
+import sys
+from fseq2.fseq2 import __version__
+import tempfile
+from pybedtools import cleanup as pybedtools_cleanup
+
+
+def main(temp_dir_name):
+    """ Entry point for F-Seq2.
+
+    """
+    ### 1. setup argparse ###
+    parser = argparse.ArgumentParser(description='F-Seq2 is a feature density estimator for high-throughput sequence tags')
+    subparser = parser.add_subparsers(dest='subcommand')
+    subparser.required = True
+
+    add_callpeak_arg(subparser)
+    add_callpeak_idr_arg(subparser)
+    add_idr_arg(subparser)
+
+    args = parser.parse_args()
+
+    if args.o:
+        if not os.path.exists(args.o):
+            try:
+                os.makedirs(args.o)
+            except:
+                sys.exit('Error: cannot create output directory!')
+    args.temp_dir_name = temp_dir_name
+
+
+    ### 2. call subcommand ###
+    if args.subcommand == 'callpeak':
+        from fseq2.callpeak_main import main as submain
+        if args.v:
+            print(f'PROGRAM: fseq{__version__} callpeak', flush=True)
+        submain(args)
+    elif args.subcommand == 'callpeak_idr':
+        from fseq2.callpeak_idr_main import main as submain
+        if args.v:
+            print(f'PROGRAM: fseq{__version__} callpeak_idr\n', flush=True)
+        submain(args)
+    elif args.subcommand == 'idr':
+        from fseq2.idr_main import main as submain
+        if args.v:
+            print(f'PROGRAM: fseq{__version__} idr', flush=True)
+        submain(args)
+
+    return
+
+
+def add_callpeak_arg(subparser):
+    """
+    """
+
+    parser_callpeak = subparser.add_parser('callpeak', help='Main F-Seq2 Function: Call peaks from alignment results.')
+
+    # input files related arguments
+    parser_group_input_files = parser_callpeak.add_argument_group("Input files arguments")
+    parser_group_input_files.add_argument('treatment_file',
+                                          help='Treatment file(s) in bam or bed format. If specifiy multiple files '
+                                               '(separated by space), they are considered as one treatment experiment.',
+                                          nargs='+')
+    parser_group_input_files.add_argument('-control_file',
+                                          help='Control file(s) in bam or bed format. If specifiy multiple files '
+                                               '(separated by space), they are considered as one control experiment.',
+                                          nargs='+')
+    parser_group_input_files.add_argument('-pe',
+                                          help='Paired-end mode. If this flag on, treatment (and control) file(s) are '
+                                               'paired-end data, either in format of BAMPE or BEDPE. Default is False '
+                                               'to treat all data as single-end.',
+                                          default=False,
+                                          action='store_true')
+    parser_group_input_files.add_argument('-chrom_size_file',
+                                          help='A file specify chrom sizes, where each line has one chrom and its size. '
+                                               'This is required if output signal format is bigwig. Note if this file is '
+                                               'specified, fseq2 only process the chroms in this file. Default is False '
+                                               'to process all and cannot output bigwig.',
+                                          default=False)
+
+    # output files related arguments
+    parser_group_output_files = parser_callpeak.add_argument_group("Output files arguments")
+    parser_group_output_files.add_argument('-o', help='Output directory (default=current directory).', default='.')
+    parser_group_output_files.add_argument('-name', help='Prefix for output files (default=fseq2_result).',
+                                           default='fseq2_result')
+    parser_group_output_files.add_argument('-sig_format',
+                                           help='Signal format for reconstructed signal. Available format: wig, bigwig, '
+                                                'np_array. Note if choose np_array, arrays for each chrom are stored in '
+                                                'NAME_sig.h5 with chrom as key. Default is False, without output signal.',
+                                           choices=['wig', 'bigwig', 'np_array'], default=False)
+    parser_group_output_files.add_argument('-sort_by',
+                                           help="Sort peaks and summits by pValue or chromAndStart. Default is chromAndStart.",
+                                           default='chromAndStart')
+    parser_group_output_files.add_argument('-v', help='Verbose output. Default is False.', default=False, action='store_true')
+
+    # general parameter related arguments
+    parser_group_param = parser_callpeak.add_argument_group("General parameter arguments")
+    parser_group_param.add_argument('-f',
+                                    help="Fragment size of treatment data. Default is to estimate from data. This determines "
+                                         "shift size where offset = fragment_size/2. For DNase-seq and ATAC-seq data, set -f 0. ",
+                                    default=False, type=int)
+    parser_group_param.add_argument('-l',
+                                    help='Feature length for treatment data. Default is 600. Recommend 50 for TF ChIP-seq, '
+                                         '600 for DNase-seq and ATAC-seq, 1000 for histone ChIP-seq.',
+                                    default=600, type=int)
+    parser_group_param.add_argument('-fc',
+                                    help="Fragment size of control data.", default=False, type=int)
+    # parser_group_param.add_argument('-lc', help='feature length of control (default=12000)', default=12000, type=int)
+    parser_group_param.add_argument('-t',
+                                    help='Threshold (standard deviations) to call candidate summits. Default is 4.0. '
+                                         'Recommend 4.0 for broad peaks, 8.0 for sharp peaks.',
+                                    default=4.0, type=float)
+    parser_group_param.add_argument('-p_thr', help="P value threshold. Default is 0.01.", default=0.01, type=float)
+    parser_group_param.add_argument('-q_thr',
+                                    help="Q value (FDR) threshold. Default is not set and use p_thr. If set, only use q_thr.",
+                                    default=False, type=float)
+    parser_group_param.add_argument('-cpus', help='Number of cpus to use. Default is 1.',
+                                    default=1,
+                                    type=int)
+
+    # ATAC-seq related arguments
+    parser_group_atac = parser_callpeak.add_argument_group("Useful ATAC-seq arguments")
+    parser_group_atac.add_argument('-nfr_upper_limit',
+                                   help='Nucleosome free region upper limit. Default is 150. Used as window_size and '
+                                        'min_distance when -f 0.',
+                                   default=150, type=int)
+    parser_group_atac.add_argument('-pe_fragment_size_range',
+                                   help='Effective only if -PE on. Keep PE fragments whose size within the range. '
+                                        'Default is False, without any selection. Useful for ATAC-seq data: '
+                                        '(1) to call peaks on nucleosome free regions, specify: 0 150 '
+                                        '(2) to call peaks on nucleosome centers, specify: 150 inf',
+                                   nargs='+', default=False)
+
+    # IDR related arguments
+    parser_group_idr = parser_callpeak.add_argument_group("Useful IDR arguments")
+    parser_group_idr.add_argument('-prior_pad_summit',
+                                  help='Prior knowledge about peak length which only padded into NAME_summits.narrowPeak. '
+                                       'Default is 0.',
+                                  default=0, type=int)
+    parser_group_idr.add_argument('-num_peaks',
+                                  help="Maximum number of peaks called. Default is not set. If set, overrides p_thr and q_thr.",
+                                  default=False, type=int)
+
+    return
+
+
+def add_callpeak_idr_arg(subparser):
+    from fseq2 import idr_2_0_3 as idr
+
+    parser_callpeak_idr = subparser.add_parser('callpeak_idr',
+                                               help='Call peaks by F-Seq2 and follow by IDR for ChIP-seq data.')
+
+    # input files related arguments
+    parser_group_input_files = parser_callpeak_idr.add_argument_group("Input files arguments")
+    parser_group_input_files.add_argument('treatment_file_1', help='Treatment file in bam or bed format as replicate 1.')
+    parser_group_input_files.add_argument('treatment_file_2', help='Treatment file in bam or bed format as replicate 2.')
+    parser_group_input_files.add_argument('-control_file_1',
+                                          help='Control file in bam or bed format, paired with replicate 1 treament file.')
+    parser_group_input_files.add_argument('-control_file_2',
+                                          help='Control file in bam or bed format, paired with replicate 2 treament file.')
+    parser_group_input_files.add_argument('-pe',
+                                          help='Paired-end mode. If this flag on, treatment (and control) file(s) are '
+                                               'paired-end data, either in format of BAMPE or BEDPE. Default is False '
+                                               'to treat all data as single-end.',
+                                          default=False,
+                                          action='store_true')
+    parser_group_input_files.add_argument('-chrom_size_file',
+                                          help='A file specify chrom sizes, where each line has one chrom and its size. '
+                                               'This is required if output signal format is bigwig. Note if this file is '
+                                               'specified, fseq2 only process the chroms in this file. Default is False '
+                                               'to process all and cannot output bigwig.',
+                                          default=False)
+
+    # output files related arguments
+    parser_group_output_files = parser_callpeak_idr.add_argument_group("Output files arguments")
+    parser_group_output_files.add_argument('-o', help='Output directory (default=current directory).', default='.')
+    parser_group_output_files.add_argument('-name_1', help='Prefix for output files for replicate 1 (default=fseq2_result_1).',
+                                           default='fseq2_result_1')
+    parser_group_output_files.add_argument('-name_2', help='Prefix for output files for replicate 2 (default=fseq2_result_2).',
+                                           default='fseq2_result_2')
+    parser_group_output_files.add_argument('-sig_format',
+                                           help='Signal format for reconstructed signal. Available format: wig, bigwig, '
+                                                'np_array. Note if choose np_array, arrays for each chrom are stored in '
+                                                'NAME_sig.h5 with chrom as key. Default is False, without output signal.',
+                                           choices=['wig', 'bigwig', 'np_array'],
+                                           default=False)
+    # parser_group_output_files.add_argument('-sort_by',
+    #                                        help="Sort peaks and summits by pValue or chromAndStart. Default is chromAndStart.",
+    #                                        default='chromAndStart')
+    parser_group_output_files.add_argument('-v', help='Verbose output. Default is False', default=False, action='store_true')
+
+    # general parameter related arguments
+    parser_group_param = parser_callpeak_idr.add_argument_group("General parameter arguments")
+    parser_group_param.add_argument('-f',
+                                    help="Fragment size of treatment data. Default is to estimate from data. This determines "
+                                         "shift size where offset = fragment_size/2. For DNase-seq and ATAC-seq data, set -f 0. ",
+                                    default=False, type=int)
+    parser_group_param.add_argument('-l',
+                                    help='Feature length for treatment data. Default is 600. Recommend 50 for TF ChIP-seq, '
+                                         '600 for DNase-seq and ATAC-seq, 1000 for histone ChIP-seq.',
+                                    default=600, type=int)
+    parser_group_param.add_argument('-fc',
+                                    help="Fragment size of control data.", default=False, type=int)
+    # parser_group_param.add_argument('-lc', help='feature length of control (default=12000)', default=12000, type=int)
+    parser_group_param.add_argument('-t',
+                                    help='Threshold (standard deviations) to call candidate summits. Default is 4.0. '
+                                         'Recommend 4.0 for broad peaks, 8.0 for sharp peaks.',
+                                    default=4.0, type=float)
+    # parser_group_param.add_argument('-p_thr', help="P value threshold. Default is 0.01.", default=0.01, type=float)
+    # parser_group_param.add_argument('-q_thr',
+    #                                 help="Q value (FDR) threshold. Default is not set and use p_thr. If set, only use q_thr.",
+    #                                 default=False, type=float)
+    parser_group_param.add_argument('-cpus', help='Number of cpus to use. Default is 1.',
+                                    default=1,
+                                    type=int)
+
+    # # ATAC-seq related arguments
+    # parser_group_atac = parser_callpeak_idr.add_argument_group("Useful ATAC-seq arguments")
+    # parser_group_atac.add_argument('-nfr_upper_limit',
+    #                                help='Nucleosome free region upper limit. Default is 150 bp. Used as '
+    #                                     'window_size and min_distance when fragment size (-f) set to 0.',
+    #                                default=150, type=int)
+    # parser_group_atac.add_argument('-pe_fragment_size_range',
+    #                                help='Only keep paired-end fragments whose size within the range. '
+    #                                     'Default is to select nucleosome free regions for ATAC-seq data, '
+    #                                     'i.e. [0, 150]. To call peaks on nucleosome centers, specify: '
+    #                                     '150 inf. Keep all, no filtering specify: False',
+    #                                nargs='+', default=[0, 150])
+
+    # IDR related arguments
+    parser_group_idr = parser_callpeak_idr.add_argument_group("Useful IDR arguments")
+    parser_group_idr.add_argument('-prior_pad_summit',
+                                  help='Prior knowledge about peak length which only padded into NAME_summits.narrowPeak. '
+                                       'Default is est. fragment_size.',
+                                  default='fragment_size')
+    # parser_group_idr.add_argument('-num_peaks',
+    #                               help="Maximum number of peaks called. Default is not set. If set, overrides p_thr and q_thr.",
+    #                               default=False, type=int)
+    parser_group_idr.add_argument('--idr_threshold', type=float, default=None,
+                                  help="Only return peaks with a global idr threshold below this value." \
+                                       + "\nDefault: report all peaks")
+    parser_group_idr.add_argument('--soft_idr_threshold', type=float, default=None,
+                                  help="Report statistics for peaks with a global idr below this " \
+                                       + "value but return all peaks with an idr below --idr.\nDefault: %.2f" \
+                                       % idr.DEFAULT_SOFT_IDR_THRESH)
+    parser_group_idr.add_argument('--plot', default=True,
+                                  help='Plot IDR results. Specify False if no plot. Default is to plot to NAME_1_NAME_2.png. '
+                                       'Can specify other name here. Notice this is different from original IDR package.')  # different from orginal idr and idr wrapper
+
+    return
+
+
+def add_idr_arg(subparser):
+    import sys
+    from fseq2 import idr_2_0_3 as idr
+    from fseq2.idr_2_0_3.idr import PossiblyGzippedFile
+
+    parser_idr = subparser.add_parser('idr', help='Wrapper for IDR for customized IDR analysis.')
+
+    parser_idr.add_argument('--samples', type=PossiblyGzippedFile, nargs=2,
+                            required=True,
+                            help='Files containing peaks and scores.')
+    parser_idr.add_argument('--peak-list', type=PossiblyGzippedFile,
+                            help='If provided, all peaks will be taken from this file.')
+    parser_idr.add_argument('--input-file-type', default='narrowPeak',
+                            choices=['narrowPeak', 'broadPeak', 'bed', 'gff'],
+                            help='File type of --samples and --peak-list.')
+
+    parser_idr.add_argument('--rank',
+                            help="Which column to use to rank peaks." \
+                                 + "\t\nOptions: signal.value p.value q.value columnIndex" \
+                                 + "\nDefaults:\n\tnarrowPeak/broadPeak: signal.value\n\tbed: score")
+    parser_idr.add_argument('-o', help='output directory (default=current directory)', default='.')  # Sam refactor
+    default_ofname = "idrValues.txt"
+    parser_idr.add_argument('--output-file',
+                            default=default_ofname,
+                            help='Output file name.\nDefault: {}'.format(default_ofname))
+    parser_idr.add_argument('--output-file-type',
+                            choices=['narrowPeak', 'broadPeak', 'bed'],
+                            default=None,
+                            help='Output file type. Defaults to input file type when available, otherwise bed.')
+
+    parser_idr.add_argument('--log-output-file', type=argparse.FileType("w"),
+                            default=sys.stderr,
+                            help='File to write output to. Default: stderr')
+
+    parser_idr.add_argument('--idr-threshold', type=float, default=None,
+                            help="Only return peaks with a global idr threshold below this value." \
+                                 + "\nDefault: report all peaks")
+    parser_idr.add_argument('--soft-idr-threshold', type=float, default=None,
+                            help="Report statistics for peaks with a global idr below this " \
+                                 + "value but return all peaks with an idr below --idr.\nDefault: %.2f" \
+                                 % idr.DEFAULT_SOFT_IDR_THRESH)
+
+    parser_idr.add_argument('--use-old-output-format',
+                            action='store_true', default=False,
+                            help="Use old output format.")
+
+    parser_idr.add_argument('--plot', default=False,
+                            help='Plot IDR results, specify name here. Default is no plot (False).')  # different from orginal idr
+
+    parser_idr.add_argument('--use-nonoverlapping-peaks',
+                            action="store_true", default=False,
+                            help='Use peaks without an overlapping match and set the value to 0.')
+
+    parser_idr.add_argument('--peak-merge-method',
+                            choices=["sum", "avg", "min", "max"], default=None,
+                            help="Which method to use for merging peaks.\n" \
+                                 + "\tDefault: 'sum' for signal/score/column indexes, 'min' for p/q-value.")
+
+    parser_idr.add_argument('--initial-mu', type=float, default=idr.DEFAULT_MU,
+                            help="Initial value of mu. Default: %.2f" % idr.DEFAULT_MU)
+    parser_idr.add_argument('--initial-sigma', type=float,
+                            default=idr.DEFAULT_SIGMA,
+                            help="Initial value of sigma. Default: %.2f" % idr.DEFAULT_SIGMA)
+    parser_idr.add_argument('--initial-rho', type=float, default=idr.DEFAULT_RHO,
+                            help="Initial value of rho. Default: %.2f" % idr.DEFAULT_RHO)
+    parser_idr.add_argument('--initial-mix-param',
+                            type=float, default=idr.DEFAULT_MIX_PARAM,
+                            help="Initial value of the mixture params. Default: %.2f" \
+                                 % idr.DEFAULT_MIX_PARAM)
+
+    parser_idr.add_argument('--fix-mu', action='store_true',
+                            help="Fix mu to the starting point and do not let it vary.")
+    parser_idr.add_argument('--fix-sigma', action='store_true',
+                            help="Fix sigma to the starting point and do not let it vary.")
+
+    parser_idr.add_argument('--dont-filter-peaks-below-noise-mean',
+                            default=False,
+                            action='store_true',
+                            help="Allow signal points that are below the noise mean (should only be used if you know what you are doing).")
+
+    parser_idr.add_argument('--use-best-multisummit-IDR',
+                            default=False, action='store_true',
+                            help="Set the IDR value for a group of multi summit peaks (same chr/start/stop but different summit) to the best value across all peaks. This is a work around for peak callers that don't do a good job splitting scores across multi summit peaks.")
+
+    parser_idr.add_argument('--allow-negative-scores',
+                            default=False,
+                            action='store_true',
+                            help="Allow negative values for scores. (should only be used if you know what you are doing)")
+
+    parser_idr.add_argument('--random-seed', type=int, default=0,
+                            help="The random seed value (sor braking ties). Default: 0")
+    parser_idr.add_argument('--max-iter', type=int, default=idr.MAX_ITER_DEFAULT,
+                            help="The maximum number of optimization iterations. Default: %i"
+                                 % idr.MAX_ITER_DEFAULT)
+    parser_idr.add_argument('--convergence-eps', type=float,
+                            default=idr.CONVERGENCE_EPS_DEFAULT,
+                            help="The maximum change in parameter value changes " \
+                                 + "for convergence. Default: %.2e" % idr.CONVERGENCE_EPS_DEFAULT)
+
+    parser_idr.add_argument('--only-merge-peaks', action='store_true',
+                            help="Only return the merged peak list.")
+
+    parser_idr.add_argument('--verbose', action="store_true", default=False,
+                            help="Print out additional debug information")
+    parser_idr.add_argument('--quiet', action="store_true", default=False,
+                            help="Don't print any status messages")
+
+    parser_idr.add_argument('--version', action='version',
+                            version='IDR %s' % idr.__version__)
+
+    return
+
+
+def fseq2_cleanup(temp_dir):
+    """Clean up pybedtools files. And my tmp files
+    """
+    temp_dir.cleanup()
+    pybedtools_cleanup()
+
+    return
+
+
+if __name__ == '__main__':
+    temp_dir = tempfile.TemporaryDirectory()
+    temp_dir_name = temp_dir.name
+    try:
+        main(temp_dir_name)
+    except KeyboardInterrupt:
+        print('User interrputed!', flush=True)
+    except MemoryError:
+        print('Memory error! Please try with less cpus by specifying -cpus.', flush=True)
+    finally:
+        fseq2_cleanup(temp_dir)
