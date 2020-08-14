@@ -26,7 +26,12 @@ from different datasets.
 3. [Output files and formats](#output-files-and-formats)
 4. [Examples](#examples)
 5. [Reference](#reference)
-6. [Trouble shooting](#trouble-shooting)
+6. [Troubleshooting](#troubleshooting)
+
+
+
+## Installation
+See [here](./INSTALL.md).
 
 
 
@@ -231,7 +236,7 @@ $ fseq2 callpeak treatment_file.bed -control_file control_file.bed -l 50 -t 8.0 
 
 
 
-## Trouble shooting
+## Troubleshooting
 
 ##### 1. Install error on mac Mojave: 
 ```
