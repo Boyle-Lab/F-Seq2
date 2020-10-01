@@ -27,14 +27,14 @@ $ conda install fseq2
 ### Install from source
 
 ```
-$ git clone https://github.com/Boyle-Lab/F-Seq2
+$ wget https://github.com/Boyle-Lab/F-Seq2/archive/master.zip
 
-$ cd Fseq2
+$ unzip master.zip
 
-# install through
-$ pip install fseq2
+$ cd F-Seq2-master
 
-# or install through
+# install all dependencies listed below
+
 $ python setup.py install
 ```
 

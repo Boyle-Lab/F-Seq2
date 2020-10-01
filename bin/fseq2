@@ -27,8 +27,11 @@ def main(temp_dir_name):
 
     args = parser.parse_args()
 
-    if args.p_thr == 'False':
-        args.p_thr = False
+    try:
+        if args.p_thr == 'False':
+            args.p_thr = False
+    except:
+        pass
     if args.o:
         if not os.path.exists(args.o):
             try:
