@@ -10,7 +10,7 @@ from setuptools import setup, find_packages
 with open('HISTORY.rst') as history_file:
     history = history_file.read()
 
-requirements = ['numpy', 'scipy >= 0.13', 'pandas >= 0.24', 'numba', 'statsmodels',
+requirements = ['numpy', 'scipy >= 0.13', 'pandas >= 0.24', 'statsmodels',
                 'KDEpy', 'pybedtools', 'pyBigWig', 'h5py', 'matplotlib']
 
 setup_requirements = ['pytest-runner']

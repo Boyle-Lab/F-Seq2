@@ -25,10 +25,6 @@ def main(args):
     args.num_peaks = 300000
     args.p_thr = False
     args.q_thr = False
-    #args.prior_pad_summit = 'fragment_size'
-    # # other args to let fseq2 run
-    # args.nfr_upper_limit = 150
-    # args.pe_fragment_size_range = False
 
     callpeak_main(args)
 

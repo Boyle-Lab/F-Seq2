@@ -140,20 +140,22 @@ def add_callpeak_arg(subparser):
                                         'min_distance when -f 0.',
                                    default=150, type=int)
     parser_group_atac.add_argument('-pe_fragment_size_range',
-                                   help='Effective only if -PE on. Only keep PE fragments whose size within the range to call peaks. '
-                                        'Default is False, without any selection. Useful for ATAC-seq data:'
+                                   help='Effective only if -pe on. Only keep PE fragments whose size within the range to call peaks. '
+                                        'Default is False, without any selection. Useful for ATAC-seq data:  '
                                         '(1) to call peaks on nucleosome free regions, specify: 0 150 '
                                         '(2) to call peaks on nucleosome centers, specify: 150 inf '
                                         '(3) to call peaks on open chromatin regions, specify: auto '
-                                        'Auto is a filter designed for ATAC-seq where we filter out fragments whose size '
-                                        'related to mono-, di-, tri-, and multi-nucleosomes. Size information is taken '
-                                        'from original ATAC-seq paper. You can design your own based on specific '
-                                        'experiment data using -nucleosome_size parameter.',
+                                        'Auto is a filter designed for ATAC-seq open chromatin peak calling where we '
+                                        'filter out fragments whose size related to mono-, di-, tri-, and multi-nucleosomes. '
+                                        'Size information is taken from the original ATAC-seq paper (Buenrostro et al.). '
+                                        'You can design your own auto filter based on specific experiment data by '
+                                        'specifying -nucleosome_size parameter.',
                                    nargs='+', default=False)
     parser_group_atac.add_argument('-nucleosome_size',
-                                   help='Effective only if -PE on and specify -pe_fragment_size_range auto. Default is 180, 247, 315, 473, 558, 615 '
+                                   help='Effective only if -pe on and specify -pe_fragment_size_range auto. Default is 180, 247, 315, 473, 558, 615 '
                                         'They are the ATAC-seq PE fragment sizes related to mono-, di-, and tri-nucleosomes. '
-                                        'Those fragments are filtered out when calling peaks. Change those numbers to design your own filter.',
+                                        'Fragments whose size within the ranges and above the largest bound (i.e. 615) '
+                                        'are filtered out when calling peaks. Change those numbers to design your own filter.',
                                    nargs='+', default=[180, 247, 315, 473, 558, 615])
 
     # IDR related arguments
@@ -252,20 +254,22 @@ def add_callpeak_idr_arg(subparser):
                                         'min_distance when -f 0.',
                                    default=150, type=int)
     parser_group_atac.add_argument('-pe_fragment_size_range',
-                                   help='Effective only if -PE on. Only keep PE fragments whose size within the range to call peaks. '
-                                        'Default is False, without any selection. Useful for ATAC-seq data:'
+                                   help='Effective only if -pe on. Only keep PE fragments whose size within the range to call peaks. '
+                                        'Default is False, without any selection. Useful for ATAC-seq data:  '
                                         '(1) to call peaks on nucleosome free regions, specify: 0 150 '
                                         '(2) to call peaks on nucleosome centers, specify: 150 inf '
                                         '(3) to call peaks on open chromatin regions, specify: auto '
-                                        'Auto is a filter designed for ATAC-seq where we filter out fragments whose size '
-                                        'related to mono-, di-, tri-, and multi-nucleosomes. Size information is taken '
-                                        'from original ATAC-seq paper. You can design your own based on specific '
-                                        'experiment data using -nucleosome_size parameter.',
+                                        'Auto is a filter designed for ATAC-seq open chromatin peak calling where we '
+                                        'filter out fragments whose size related to mono-, di-, tri-, and multi-nucleosomes. '
+                                        'Size information is taken from the original ATAC-seq paper (Buenrostro et al.). '
+                                        'You can design your own auto filter based on specific experiment data by '
+                                        'specifying -nucleosome_size parameter.',
                                    nargs='+', default=False)
     parser_group_atac.add_argument('-nucleosome_size',
-                                   help='Effective only if -PE on and specify -pe_fragment_size_range auto. Default is 180, 247, 315, 473, 558, 615 '
+                                   help='Effective only if -pe on and specify -pe_fragment_size_range auto. Default is 180, 247, 315, 473, 558, 615 '
                                         'They are the ATAC-seq PE fragment sizes related to mono-, di-, and tri-nucleosomes. '
-                                        'Those fragments are filtered out when calling peaks. Change those numbers to design your own filter.',
+                                        'Fragments whose size within the ranges and above the largest bound (i.e. 615) '
+                                        'are filtered out when calling peaks. Change those numbers to design your own filter.',
                                    nargs='+', default=[180, 247, 315, 473, 558, 615])
 
 

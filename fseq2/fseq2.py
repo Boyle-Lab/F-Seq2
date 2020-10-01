@@ -24,7 +24,6 @@ from scipy import stats
 from scipy.ndimage import filters
 from scipy.signal import find_peaks, fftconvolve
 from statsmodels.stats.multitest import multipletests
-#from numba import jit
 
 
 def read_in_file(file_name, pe, pe_fragment_size_range, nucleosome_size, chrom_ls_to_process):
@@ -94,10 +93,6 @@ def read_in_file(file_name, pe, pe_fragment_size_range, nucleosome_size, chrom_l
 
     bed.sort_values(['chrom', 'start'], inplace=True)
 
-    # TODO:
-    #   1. make sure pe reads on the same chrom
-    #   2. samtools sort -n in.bam -o out.bam <= bedtools -BEDPE requires bam sorted by name
-
     return bed, [fragment_size_before_filter, fragment_size_after_filter, filter_out_rate]
 
 
@@ -127,19 +122,8 @@ def calculate_fragment_size(cuts_df, verbose=False):
     cuts_ls = cuts_df_mod['cuts'].values
     neg_strand_ls = (cuts_df_mod['strand'] == '-').values
 
-    # if verbose:
-    #     print('Calculating fragment size (specify -f 0 if using DNase HS data) ...',
-    #           flush=True)
-
     fragment_size = wmw_rank_searchsorted(cuts_ls=cuts_ls, pos_cuts_ls=pos_cuts_ls, max_range=max_range, prior=prior,
                                           neg_strand_ls=neg_strand_ls)
-    #fragment_size = int(np.median(np.concatenate([cuts_ls[(cuts_ls > (current_cuts - max_range + prior)) &
-                                                          #(cuts_ls < (current_cuts + max_range + prior)) &
-                                                          #neg_strand_ls] - current_cuts
-                                                  #for current_cuts in pos_cuts_ls], axis=0)))
-
-    # if verbose:
-    #     print('Done!', flush=True)
 
     return fragment_size
 
@@ -201,20 +185,13 @@ def calculate_threshold(size, ncuts, std, std_p, bandwidth):
     np.random.seed(934) # may not need it
     simulated_results = [KDEpy.FFTKDE(bw=bandwidth).fit(np.random.randint(total_window, size=cut_density)).evaluate(
         np.arange(-1, total_window + 1))[window_size + 1] for _ in range(threshold_iterations)]
-    # the following has more readability
-    #simulated_results = []
-    #for _ in range(threshold_iterations):
-        #simulated_cuts = np.random.randint(total_window, size=cut_density)
-        #kdepy_kde = KDEpy.FFTKDE(bw=bandwidth)
-        #kdepy_kde.fit(simulated_cuts)
-        #simulated_results.append(kdepy_kde.evaluate(np.arange(-1, total_window + 1))[window_size + 1])
     kdepy_result = np.array(simulated_results) * cut_density
 
     threshold = np.mean(kdepy_result) + std * np.std(kdepy_result)
 
-    peak_region_threshold = np.mean(kdepy_result) + std_p * np.std(kdepy_result) #7.27
+    peak_region_threshold = np.mean(kdepy_result) + std_p * np.std(kdepy_result)
 
-    return threshold, peak_region_threshold #7.27
+    return threshold, peak_region_threshold
 
 
 def init_child(lock_):
@@ -227,8 +204,6 @@ def run_kde(cuts_array, start_array, end_array, strand_array,
     """Run kde with control.
     """
     start_time = time.time()
-    # weights_control = np.ones(cuts_array_control.shape[0])
-    # weights = np.ones(cuts_array.shape[0])
 
 
     ### 1. run kde for input ###
@@ -261,19 +236,9 @@ def run_kde(cuts_array, start_array, end_array, strand_array,
     # align kde_result_control with kde_result
     kdepy_result_control = align_array(kde_result_control=kdepy_result_control, kde_result_shape=kdepy_result.shape[0],
                                        first_cut_control=first_cut_control, first_cut=first_cut)
-    #maybe we can run kde for control first => max one kdepy_result at run time
-    #first_cut = cuts_df['cuts'].min()
-    #kde_result_shape needs some effort
-    #so maybe not?
+
 
     ### 2.5 estimate total number of tests ###
-    # with lock:
-    #     num_tests_before_filter, num_tests_after_filter = est_num_total_tests(chrom = chrom, kdepy_result=kdepy_result,
-    #                                                                           kdepy_result_control=kdepy_result_control,
-    #                                                                           lambda_bg_lower_bound_ind=lambda_bg_lower_bound_ind,
-    #                                                                           min_distance=params.min_distance,
-    #                                                                           window_size=params.window_size) #6.30
-
     # unload memory
     with lock: # 7.23
         # 1. if output sig, weight and output
@@ -296,23 +261,6 @@ def run_kde(cuts_array, start_array, end_array, strand_array,
                                                           params.sig_float_precision).astype(np.float16),
                                             dtype='f2')#, compression='gzip')
                     sig_file.attrs[chrom] = first_cut
-            # with open(treatment_np_tmp_name, 'ab') as sig_file, open(treatment_chrom_index_name, 'a') as index_file:
-            #     #index_file.write(f'{chrom},{first_cut}\n') #7.27
-            #     index_file.write(f'{chrom},{first_cut},{kdepy_result.shape[0]}\n') # need to change back to the above
-            #                                                                         # after inspection of control sig
-            #
-            #     # np.save(sig_file, np.around(gaussian_kernel_fft(np.divide(kdepy_result,
-            #     #                                                         kdepy_result_control,
-            #     #                                                         out=np.zeros_like(kdepy_result),
-            #     #                                                         where=kdepy_result_control > lambda_bg_lower_bound_ind),
-            #     #                                               sigma=bandwidth_control),
-            #     #                             sig_float_precision).astype(np.float16))  # 7.27
-            #     # np.save(sig_file, np.around(gaussian_filter1d(np.divide(kdepy_result,
-            #     #                                                         kdepy_result_control, out=np.zeros_like(kdepy_result),
-            #     #                                                         where=kdepy_result_control>lambda_bg_lower_bound_ind),
-            #     #                                               sigma=bandwidth_control),
-            #     #                             sig_float_precision).astype(np.float16)) # 7.27
-            #     # np.save(sig_file, np.around(kdepy_result, 2).astype(np.float16)) # weight here!
 
         # 2. calculate lambda_bg which needs all control signal in memory
         lambda_bg = calculate_lambda_bg(kdepy_result_control, window_size=params.window_size,
@@ -323,7 +271,7 @@ def run_kde(cuts_array, start_array, end_array, strand_array,
         control_np_tmp = np.memmap(control_np_tmp_name, dtype=np.float32, mode='w+', shape=kdepy_result_control.shape)
         control_np_tmp[:] = kdepy_result_control[:]
         del control_np_tmp, kdepy_result_control, first_cut_control
-    # if without control: control_np_tmp_name = False
+        # if without control: control_np_tmp_name = False
 
 
     ### 3. call peaks using input ###
@@ -339,23 +287,12 @@ def run_kde(cuts_array, start_array, end_array, strand_array,
         return pd.DataFrame() # no peaks called
 
     # calculate query value array
-    # 7.23: change prepare_stats_test to calculate_query_value, if need control_value, return it in find_local_lambda
+    # change prepare_stats_test to calculate_query_value, if need control_value, return it in find_local_lambda
     query_value = calculate_query_value(result_df=result_df, kdepy_result=kdepy_result,
                                         summit_abs_pos_array=summit_abs_pos_array, window_size=params.window_size)
-    # lambda_bg, query_value, control_value = prepare_stats_test(result_df=result_df, kdepy_result=kdepy_result,
-    #                                                            control_np_tmp_name=control_np_tmp_name,
-    #                                                            summit_abs_pos_array=summit_abs_pos_array,
-    #                                                            window_size=params.window_size,
-    #                                                            lambda_bg_lower_bound=params.lambda_bg_lower_bound,
-    #                                                            use_max=False, return_control_value=True) #6.30
 
     # calculate lambda local
-    #if control_np_tmp_name is False:
-        #control_np_tmp = kdepy_result
-    #else:
     control_np_tmp = np.memmap(control_np_tmp_name, dtype=np.float32, mode='r', shape=kdepy_result.shape)
-    #with lock: #intermediate output
-        #np.savez_compressed(f'{tmp_dir}/{chrom}.npz', arr_0=kdepy_result)
     del kdepy_result
     with lock:
         lambda_local = find_local_lambda(control_np_tmp=control_np_tmp, control_np_tmp_name=control_np_tmp_name,
@@ -368,13 +305,6 @@ def run_kde(cuts_array, start_array, end_array, strand_array,
     result_df['query_value'] = query_value
     result_df['lambda_local'] = lambda_local
 
-    # calculate q value
-    # result_df = calculate_q_value_local(query_value=query_value, lambda_local=lambda_local, result_df=result_df,
-    #                                     distribution_name=params.distribution_name, threshold_q=0.05,
-    #                                     lambda_bg_lower_bound_ind=lambda_bg_lower_bound_ind,
-    #                                     control_value=False) #6.30
-    #                                                          #7.23 change control_value to False
-
 
     end_time = time.time()
     if params.v:
@@ -384,12 +314,9 @@ def run_kde(cuts_array, start_array, end_array, strand_array,
 
     # cleanup
     with lock: #move things to storage
-        os.remove(control_np_tmp_name) #7.27
-        #shutil.move(control_np_tmp_name, f'{storage_dir}/{chrom}_control.dat')
-        #shutil.move(f'{tmp_dir}/{chrom}.npz', f'{storage_dir}/{chrom}.npz')
+        os.remove(control_np_tmp_name)
 
-
-    return result_df#, num_tests_before_filter, num_tests_after_filter
+    return result_df
 
 
 def run_kde_wo_control(cuts_array, start_array, end_array, strand_array, chrom, params):
@@ -397,8 +324,6 @@ def run_kde_wo_control(cuts_array, start_array, end_array, strand_array, chrom, 
     In this case, control is the same as input(treatment).
     """
     start_time = time.time()
-    #weights_control = np.ones(cuts_df_control.shape[0])
-    #weights = np.ones(cuts_array.shape[0])
 
 
     ### 1. run kde for input ###
@@ -409,29 +334,6 @@ def run_kde_wo_control(cuts_array, start_array, end_array, strand_array, chrom, 
                                                       num_cuts=False)
     last_cut = np.max(cuts_array)
     del cuts_array, start_array, end_array, strand_array
-
-
-    ### 2. run kde for control ###
-    #kdepy_result_control, first_cut_control, _ = calculate_kde(cuts_df=cuts_df_control, weights=weights_control,
-                                                               #fragment_offset=fragment_offset_control,
-                                                               #bandwidth=bandwidth_control, num_cuts=num_cuts)
-    #del cuts_df_control, weights_control
-
-    # align kde_result_control with kde_result
-    #kdepy_result_control = align_array(kde_result_control=kdepy_result_control, kde_result_shape=kdepy_result.shape[0],
-                                       #first_cut_control=first_cut_control, first_cut=first_cut)
-    #maybe we can run kde for control first => max one kdepy_result at run time
-    #first_cut = cuts_df['cuts'].min()
-    #kde_result_shape needs some effort
-    #so maybe not?
-
-    # unload memory
-    #with lock:
-        #control_np_tmp_name = f'{args.o}/{args.name}_{chrom}_control.dat'
-        #control_np_tmp = np.memmap(control_np_tmp_name, dtype=np.float32, mode='w+', shape=kdepy_result_control.shape)
-        #control_np_tmp[:] = kdepy_result_control[:]
-        #del control_np_tmp, kdepy_result_control, first_cut_control
-    # if without control: control_np_tmp_name = False
 
 
     ### 3. call peaks using input ###
@@ -451,36 +353,16 @@ def run_kde_wo_control(cuts_array, start_array, end_array, strand_array, chrom, 
                                     lambda_bg_lower_bound=params.lambda_bg_lower_bound)
     query_value = calculate_query_value(result_df=result_df, kdepy_result=kdepy_result,
                                         summit_abs_pos_array=summit_abs_pos_array, window_size=params.window_size)
-    # lambda_bg, query_value = prepare_stats_test(result_df=result_df, kdepy_result=kdepy_result,
-    #                                             control_np_tmp_name=False,
-    #                                             summit_abs_pos_array=summit_abs_pos_array,
-    #                                             window_size=params.window_size,
-    #                                             lambda_bg_lower_bound=params.lambda_bg_lower_bound,
-    #                                             use_max=False, return_control_value=True) #6.30
-
 
     # calculate lambda local
-    #if control_np_tmp_name is False:
-        #control_np_tmp = kdepy_result
-    #else:
-        #control_np_tmp = np.memmap(control_np_tmp_name, dtype=np.float32, mode='r', shape=kdepy_result.shape)
-    #with lock: #intermediate output
-        #np.savez_compressed(f'{tmp_dir}/{chrom}.npz', arr_0=kdepy_result)
-    #del kdepy_result
     with lock:
         lambda_local = find_local_lambda(control_np_tmp=kdepy_result, control_np_tmp_name=False,
                                          summit_abs_pos_array=summit_abs_pos_array, lambda_bg=lambda_bg,
                                          window_size=params.window_size, sparse_data=params.sparse_data, use_max=False)
-    #del control_np_tmp, summit_abs_pos_array
 
     # prepare for interpolation of p value and q value calculation
     result_df['query_value'] = query_value
     result_df['lambda_local'] = lambda_local
-
-    # calculate q value
-    # result_df = calculate_q_value_local(query_value=query_value, lambda_local=lambda_local, result_df=result_df,
-    #                                     distribution_name=params.distribution_name, threshold_q=0.05,
-    #                                     lambda_bg_lower_bound_ind=0, control_value=False)
 
     with lock: # 7.23
         # 1. if output sig, weight and output
@@ -497,27 +379,12 @@ def run_kde_wo_control(cuts_array, start_array, end_array, strand_array, chrom, 
                                             data=np.round(kdepy_result, params.sig_float_precision).astype(np.float16),
                                             dtype='f2')#, compression='gzip')
                     sig_file.attrs[chrom] = first_cut
-            # with open(treatment_np_tmp_name, 'ab') as sig_file, open(treatment_chrom_index_name, 'a') as index_file:
-            #     index_file.write(f'{chrom},{first_cut}\n')  # 7.27
-            #     # index_file.write(f'{chrom},{first_cut},{kdepy_result.shape[0]}\n') # need to change back to the above
-            #                                                                          # after inspection of control sig
-            #     np.save(sig_file,
-            #             np.around(gaussian_filter1d(kdepy_result, sigma=(bandwidth * 20)),
-            #                       sig_float_precision).astype(np.float16))  # 7.27
-                # np.save(sig_file, np.around(kdepy_result, 2).astype(np.float16)) # weight here!
 
 
     end_time = time.time()
     if params.v:
         print(f'\t{chrom}: first={first_cut}, last={last_cut}, completed in {end_time - start_time:.3f} seconds.',
               flush=True)
-
-
-    #with lock: #move things to storage
-        #os.remove(control_np_tmp_name)
-        #shutil.move(control_np_tmp_name, f'{storage_dir}/{chrom}_control.dat')
-        #shutil.move(f'{tmp_dir}/{chrom}.npz', f'{storage_dir}/{chrom}.npz')
-
 
     return result_df
 
@@ -563,318 +430,6 @@ def calculate_kde(cuts_array, start_array, end_array, strand_array, fragment_off
 
 
     return kdepy_result, first_cut, num_cuts
-
-
-# def run_kde(cuts_df, cuts_df_control, chrom, params):
-#     """Run kde with control.
-#     """
-#     start_time = time.time()
-#     weights_control = np.ones(cuts_df_control.shape[0])
-#     weights = np.ones(cuts_df.shape[0])
-#
-#
-#     ### 1. run kde for input ###
-#     kdepy_result, first_cut, num_cuts = calculate_kde(cuts_df=cuts_df, weights=weights, fragment_offset=params.fragment_offset,
-#                                                       bandwidth=params.bandwidth, scaling_factor=params.scaling_factor, num_cuts=False)
-#     last_cut = cuts_df['cuts'].max()
-#     del cuts_df, weights
-#
-#
-#     ### 2. run kde for control ###
-#     kdepy_result_control, first_cut_control, _ = calculate_kde(cuts_df=cuts_df_control, weights=weights_control,
-#                                                                fragment_offset=params.fragment_offset_control,
-#                                                                bandwidth=params.bandwidth_control,
-#                                                                scaling_factor=params.scaling_factor,
-#                                                                num_cuts=num_cuts)
-#     lambda_bg_lower_bound_ind = calculate_lambda_bg_lower_bound(bandwidth_control=params.bandwidth_control,
-#                                                                 ncuts_control=cuts_df_control.shape[0],
-#                                                                 ncuts_treatment=num_cuts,
-#                                                                 pseudo_count=1) #6.30
-#     lambda_bg_lower_bound_ind *= params.scaling_factor
-#     del cuts_df_control, weights_control
-#
-#     # align kde_result_control with kde_result
-#     kdepy_result_control = align_array(kde_result_control=kdepy_result_control, kde_result_shape=kdepy_result.shape[0],
-#                                        first_cut_control=first_cut_control, first_cut=first_cut)
-#     #maybe we can run kde for control first => max one kdepy_result at run time
-#     #first_cut = cuts_df['cuts'].min()
-#     #kde_result_shape needs some effort
-#     #so maybe not?
-#
-#     ### 2.5 estimate total number of tests ###
-#     # with lock:
-#     #     num_tests_before_filter, num_tests_after_filter = est_num_total_tests(chrom = chrom, kdepy_result=kdepy_result,
-#     #                                                                           kdepy_result_control=kdepy_result_control,
-#     #                                                                           lambda_bg_lower_bound_ind=lambda_bg_lower_bound_ind,
-#     #                                                                           min_distance=params.min_distance,
-#     #                                                                           window_size=params.window_size) #6.30
-#
-#     # unload memory
-#     with lock: # 7.23
-#         # 1. if output sig, weight and output
-#         if params.sig_format:
-#             with h5py.File(params.treatment_np_tmp_name, mode='a', libver='latest') as sig_file:
-#                 sig_file.create_dataset(chrom,
-#                                         data=np.round(np.divide(kdepy_result,
-#                                                        kdepy_result_control, out=np.zeros_like(kdepy_result),
-#                                                        where=kdepy_result_control>lambda_bg_lower_bound_ind),
-#                                                       params.sig_float_precision).astype(np.float16),
-#                                         dtype='f2')#, compression='gzip')
-#                 sig_file.attrs[chrom] = first_cut
-#             # with open(treatment_np_tmp_name, 'ab') as sig_file, open(treatment_chrom_index_name, 'a') as index_file:
-#             #     #index_file.write(f'{chrom},{first_cut}\n') #7.27
-#             #     index_file.write(f'{chrom},{first_cut},{kdepy_result.shape[0]}\n') # need to change back to the above
-#             #                                                                         # after inspection of control sig
-#             #
-#             #     # np.save(sig_file, np.around(gaussian_kernel_fft(np.divide(kdepy_result,
-#             #     #                                                         kdepy_result_control,
-#             #     #                                                         out=np.zeros_like(kdepy_result),
-#             #     #                                                         where=kdepy_result_control > lambda_bg_lower_bound_ind),
-#             #     #                                               sigma=bandwidth_control),
-#             #     #                             sig_float_precision).astype(np.float16))  # 7.27
-#             #     # np.save(sig_file, np.around(gaussian_filter1d(np.divide(kdepy_result,
-#             #     #                                                         kdepy_result_control, out=np.zeros_like(kdepy_result),
-#             #     #                                                         where=kdepy_result_control>lambda_bg_lower_bound_ind),
-#             #     #                                               sigma=bandwidth_control),
-#             #     #                             sig_float_precision).astype(np.float16)) # 7.27
-#             #     # np.save(sig_file, np.around(kdepy_result, 2).astype(np.float16)) # weight here!
-#
-#         # 2. calculate lambda_bg which needs all control signal in memory
-#         lambda_bg = calculate_lambda_bg(kdepy_result_control, window_size=params.window_size,
-#                                         lambda_bg_lower_bound=params.lambda_bg_lower_bound)
-#
-#         # 3. unload memory of control sig
-#         control_np_tmp_name = f'{params.o}/{params.name}_{chrom}_control.dat'
-#         control_np_tmp = np.memmap(control_np_tmp_name, dtype=np.float32, mode='w+', shape=kdepy_result_control.shape)
-#         control_np_tmp[:] = kdepy_result_control[:]
-#         del control_np_tmp, kdepy_result_control, first_cut_control
-#     # if without control: control_np_tmp_name = False
-#
-#
-#     ### 3. call peaks using input ###
-#     result_df = call_peaks(chrom=chrom, first_cut=first_cut, kdepy_result=kdepy_result,
-#                            min_height=params.threshold, min_distance=params.min_distance, min_prominence=params.min_prominence,
-#                            peak_region_threshold=params.peak_region_threshold) #7.27
-#
-#
-#     ### 4. prepare to calculate q value ###
-#     try:
-#         summit_abs_pos_array = result_df['summit'].values - first_cut
-#     except KeyError:
-#         return pd.DataFrame() # no peaks called
-#
-#     # calculate query value array
-#     # 7.23: change prepare_stats_test to calculate_query_value, if need control_value, return it in find_local_lambda
-#     query_value = calculate_query_value(result_df=result_df, kdepy_result=kdepy_result,
-#                                         summit_abs_pos_array=summit_abs_pos_array, window_size=params.window_size)
-#     # lambda_bg, query_value, control_value = prepare_stats_test(result_df=result_df, kdepy_result=kdepy_result,
-#     #                                                            control_np_tmp_name=control_np_tmp_name,
-#     #                                                            summit_abs_pos_array=summit_abs_pos_array,
-#     #                                                            window_size=params.window_size,
-#     #                                                            lambda_bg_lower_bound=params.lambda_bg_lower_bound,
-#     #                                                            use_max=False, return_control_value=True) #6.30
-#
-#     # calculate lambda local
-#     #if control_np_tmp_name is False:
-#         #control_np_tmp = kdepy_result
-#     #else:
-#     control_np_tmp = np.memmap(control_np_tmp_name, dtype=np.float32, mode='r', shape=kdepy_result.shape)
-#     #with lock: #intermediate output
-#         #np.savez_compressed(f'{tmp_dir}/{chrom}.npz', arr_0=kdepy_result)
-#     del kdepy_result
-#     with lock:
-#         lambda_local = find_local_lambda(control_np_tmp=control_np_tmp, control_np_tmp_name=control_np_tmp_name,
-#                                          summit_abs_pos_array=summit_abs_pos_array, lambda_bg=lambda_bg,
-#                                          window_size=params.window_size, use_max=False)
-#         # memory intensive, only allow one process
-#     del control_np_tmp, summit_abs_pos_array
-#
-#     # prepare for interpolation of p value and q value calculation
-#     result_df['query_value'] = query_value
-#     result_df['lambda_local'] = lambda_local
-#
-#     # calculate q value
-#     # result_df = calculate_q_value_local(query_value=query_value, lambda_local=lambda_local, result_df=result_df,
-#     #                                     distribution_name=params.distribution_name, threshold_q=0.05,
-#     #                                     lambda_bg_lower_bound_ind=lambda_bg_lower_bound_ind,
-#     #                                     control_value=False) #6.30
-#     #                                                          #7.23 change control_value to False
-#
-#
-#     end_time = time.time()
-#     if params.v:
-#         print(f'\t{chrom}: first={first_cut}, last={last_cut}, completed in {end_time - start_time:.3f} seconds.',
-#               flush=True)
-#
-#
-#     # cleanup
-#     with lock: #move things to storage
-#         os.remove(control_np_tmp_name) #7.27
-#         #shutil.move(control_np_tmp_name, f'{storage_dir}/{chrom}_control.dat')
-#         #shutil.move(f'{tmp_dir}/{chrom}.npz', f'{storage_dir}/{chrom}.npz')
-#
-#
-#     return result_df#, num_tests_before_filter, num_tests_after_filter
-
-# def run_kde_wo_control(cuts_df, chrom, params):
-#     """Run kde without control.
-#     In this case, control is the same as input(treatment).
-#     """
-#     start_time = time.time()
-#     #weights_control = np.ones(cuts_df_control.shape[0])
-#     weights = np.ones(cuts_df.shape[0])
-#
-#
-#     ### 1. run kde for input ###
-#     kdepy_result, first_cut, num_cuts = calculate_kde(cuts_df=cuts_df, weights=weights, fragment_offset=params.fragment_offset,
-#                                                       bandwidth=params.bandwidth, scaling_factor=params.scaling_factor,
-#                                                       num_cuts=False)
-#     last_cut = cuts_df['cuts'].max()
-#     del cuts_df, weights
-#
-#
-#     ### 2. run kde for control ###
-#     #kdepy_result_control, first_cut_control, _ = calculate_kde(cuts_df=cuts_df_control, weights=weights_control,
-#                                                                #fragment_offset=fragment_offset_control,
-#                                                                #bandwidth=bandwidth_control, num_cuts=num_cuts)
-#     #del cuts_df_control, weights_control
-#
-#     # align kde_result_control with kde_result
-#     #kdepy_result_control = align_array(kde_result_control=kdepy_result_control, kde_result_shape=kdepy_result.shape[0],
-#                                        #first_cut_control=first_cut_control, first_cut=first_cut)
-#     #maybe we can run kde for control first => max one kdepy_result at run time
-#     #first_cut = cuts_df['cuts'].min()
-#     #kde_result_shape needs some effort
-#     #so maybe not?
-#
-#     # unload memory
-#     #with lock:
-#         #control_np_tmp_name = f'{args.o}/{args.name}_{chrom}_control.dat'
-#         #control_np_tmp = np.memmap(control_np_tmp_name, dtype=np.float32, mode='w+', shape=kdepy_result_control.shape)
-#         #control_np_tmp[:] = kdepy_result_control[:]
-#         #del control_np_tmp, kdepy_result_control, first_cut_control
-#     # if without control: control_np_tmp_name = False
-#
-#
-#     ### 3. call peaks using input ###
-#     result_df = call_peaks(chrom=chrom, first_cut=first_cut, kdepy_result=kdepy_result,
-#                            min_height=params.threshold, min_distance=params.min_distance, min_prominence=params.min_prominence,
-#                            peak_region_threshold=params.peak_region_threshold) #7.27
-#
-#
-#     ### 4. prepare to calculate q value ###
-#     try:
-#         summit_abs_pos_array = result_df['summit'].values - first_cut
-#     except KeyError:
-#         return pd.DataFrame() # no peaks called
-#
-#     # calculate query value array and lambda background
-#     lambda_bg = calculate_lambda_bg(kdepy_result_control=kdepy_result, window_size=params.window_size,
-#                                     lambda_bg_lower_bound=params.lambda_bg_lower_bound)
-#     query_value = calculate_query_value(result_df=result_df, kdepy_result=kdepy_result,
-#                                         summit_abs_pos_array=summit_abs_pos_array, window_size=params.window_size)
-#     # lambda_bg, query_value = prepare_stats_test(result_df=result_df, kdepy_result=kdepy_result,
-#     #                                             control_np_tmp_name=False,
-#     #                                             summit_abs_pos_array=summit_abs_pos_array,
-#     #                                             window_size=params.window_size,
-#     #                                             lambda_bg_lower_bound=params.lambda_bg_lower_bound,
-#     #                                             use_max=False, return_control_value=True) #6.30
-#
-#
-#     # calculate lambda local
-#     #if control_np_tmp_name is False:
-#         #control_np_tmp = kdepy_result
-#     #else:
-#         #control_np_tmp = np.memmap(control_np_tmp_name, dtype=np.float32, mode='r', shape=kdepy_result.shape)
-#     #with lock: #intermediate output
-#         #np.savez_compressed(f'{tmp_dir}/{chrom}.npz', arr_0=kdepy_result)
-#     #del kdepy_result
-#     with lock:
-#         lambda_local = find_local_lambda(control_np_tmp=kdepy_result, control_np_tmp_name=False,
-#                                          summit_abs_pos_array=summit_abs_pos_array, lambda_bg=lambda_bg,
-#                                          window_size=params.window_size, use_max=False)
-#     #del control_np_tmp, summit_abs_pos_array
-#
-#     # prepare for interpolation of p value and q value calculation
-#     result_df['query_value'] = query_value
-#     result_df['lambda_local'] = lambda_local
-#
-#     # calculate q value
-#     # result_df = calculate_q_value_local(query_value=query_value, lambda_local=lambda_local, result_df=result_df,
-#     #                                     distribution_name=params.distribution_name, threshold_q=0.05,
-#     #                                     lambda_bg_lower_bound_ind=0, control_value=False)
-#
-#     with lock: # 7.23
-#         # 1. if output sig, weight and output
-#         if params.sig_format:
-#             with h5py.File(params.treatment_np_tmp_name, mode='a', libver='latest') as sig_file:
-#                 sig_file.create_dataset(chrom,
-#                                         data=np.round(kdepy_result, params.sig_float_precision).astype(np.float16),
-#                                         dtype='f2')#, compression='gzip')
-#                 sig_file.attrs[chrom] = first_cut
-#             # with open(treatment_np_tmp_name, 'ab') as sig_file, open(treatment_chrom_index_name, 'a') as index_file:
-#             #     index_file.write(f'{chrom},{first_cut}\n')  # 7.27
-#             #     # index_file.write(f'{chrom},{first_cut},{kdepy_result.shape[0]}\n') # need to change back to the above
-#             #                                                                          # after inspection of control sig
-#             #     np.save(sig_file,
-#             #             np.around(gaussian_filter1d(kdepy_result, sigma=(bandwidth * 20)),
-#             #                       sig_float_precision).astype(np.float16))  # 7.27
-#                 # np.save(sig_file, np.around(kdepy_result, 2).astype(np.float16)) # weight here!
-#
-#
-#     end_time = time.time()
-#     if params.v:
-#         print(f'\t{chrom}: first={first_cut}, last={last_cut}, completed in {end_time - start_time:.3f} seconds.',
-#               flush=True)
-#
-#
-#     #with lock: #move things to storage
-#         #os.remove(control_np_tmp_name)
-#         #shutil.move(control_np_tmp_name, f'{storage_dir}/{chrom}_control.dat')
-#         #shutil.move(f'{tmp_dir}/{chrom}.npz', f'{storage_dir}/{chrom}.npz')
-#
-#
-#     return result_df
-
-
-# def calculate_kde(cuts_df, weights, fragment_offset, bandwidth, scaling_factor, num_cuts=False):
-#     """Calculate kde array without all chrs scaling.
-#     Individual chrom scaling and num cuts scaling.
-#
-#     """
-#     cuts = cuts_df['cuts'].values
-#     first_cut = cuts.min()
-#     last_cut = cuts.max()
-#     if fragment_offset == 0:
-#         kdepy_kde = KDEpy.FFTKDE(bw=bandwidth).fit(cuts, weights=weights)
-#         try:
-#             kdepy_result = kdepy_kde.evaluate(np.arange(first_cut - 1, last_cut + 2))[1:-2]
-#         except ValueError:
-#             np.fft.restore_all()  # if encounter the bug for MLK https://github.com/IntelPython/mkl_fft/issues/24
-#             kdepy_result = kdepy_kde.evaluate(np.arange(first_cut - 1, last_cut + 2))[1:-2]
-#         # kdepy_result = (kdepy_result * 20000000) / ncuts * (weights.sum())
-#     else:
-#         cuts_w_offset = ((cuts_df['start'] + fragment_offset) * (cuts_df['strand'] == '+') +
-#                          (cuts_df['end'] - fragment_offset) * (cuts_df['strand'] == '-')).astype('int').values
-#         kde_evaluation_start = min(cuts_w_offset.min(), first_cut);
-#         kde_evaluation_end = max(cuts_w_offset.max(), last_cut)
-#         # assert (first_cut - kde_evaluation_start) >= 0
-#         kdepy_kde = KDEpy.FFTKDE(bw=bandwidth).fit(cuts_w_offset, weights=weights)
-#         try:
-#             kdepy_result = kdepy_kde.evaluate(np.arange(kde_evaluation_start - 1, kde_evaluation_end + 2))[1:-2]
-#         except ValueError:
-#             np.fft.restore_all()  # if encounter the bug for MLK https://github.com/IntelPython/mkl_fft/issues/24
-#             kdepy_result = kdepy_kde.evaluate(np.arange(kde_evaluation_start - 1, kde_evaluation_end + 2))[1:-2]
-#         kdepy_result = kdepy_result[(first_cut - kde_evaluation_start):(last_cut - kde_evaluation_start)]
-#         # kdepy_result = (kdepy_result * 20000000) / ncuts * (weights.sum()) / 2
-#         # this scaling is simulating results with offset (left window positive cuts and right window negative cuts) by
-#         # multiplying all signal with 0.5
-#
-#     if not num_cuts:
-#         num_cuts = cuts.shape[0]
-#     kdepy_result = (kdepy_result * num_cuts * scaling_factor).astype(np.float32) # lets use all reads, more related to threshold
-#
-#     return kdepy_result, first_cut, num_cuts
 
 
 def align_array(kde_result_control, kde_result_shape, first_cut_control, first_cut):
@@ -976,7 +531,7 @@ def call_peaks(chrom, first_cut, kdepy_result, min_height, peak_region_threshold
                               pd.Series(peak_indexes, name='start'),
                               pd.Series(peak_indexes + 1, name='end'),
                               pd.Series(properties['peak_heights'], name='score'),
-                              pd.Series(properties['prominences'], name='strand')], axis=1)  # change
+                              pd.Series(properties['prominences'], name='strand')], axis=1)
     peak_regions['start'] += first_cut
     peak_regions['end'] += first_cut
     peak_indexes['start'] += first_cut
@@ -985,7 +540,7 @@ def call_peaks(chrom, first_cut, kdepy_result, min_height, peak_region_threshold
     peak_indexes = pybedtools.BedTool.from_dataframe(peak_indexes)
     try:
         peak_regions = peak_regions.intersect(peak_indexes, wa=True, wb=True).merge(c=[5, 7, 8], o='collapse',
-                                                                                    d=merge_peak_distance).to_dataframe()  # change
+                                                                                    d=merge_peak_distance).to_dataframe()
     except pybedtools.helpers.BEDToolsError:
         print(f'no peaks find on {chrom}')
         return pd.DataFrame()
@@ -1002,8 +557,8 @@ def call_peaks(chrom, first_cut, kdepy_result, min_height, peak_region_threshold
     peak_regions = peak_regions.astype({'summit': 'str', 'score': 'str', 'strand': 'str'})
     peak_regions['summit'] = peak_regions['summit'].str.split(',')
     peak_regions['score'] = peak_regions['score'].str.split(',')
-    peak_regions['strand'] = peak_regions['strand'].str.split(',')  # change
-    peak_regions = explode_multiindex(df=peak_regions, lst_cols=['summit', 'score', 'strand'])  # change
+    peak_regions['strand'] = peak_regions['strand'].str.split(',')
+    peak_regions = explode_multiindex(df=peak_regions, lst_cols=['summit', 'score', 'strand'])
     peak_regions = peak_regions.astype(
         {'summit': 'int32', 'score': 'float32', 'strand': 'float32'})  # memory: may delete strand finally?
     peak_regions['summit_end'] = peak_regions['summit'] + 1
@@ -1206,33 +761,29 @@ def find_local_lambda(control_np_tmp, control_np_tmp_name, summit_abs_pos_array,
     # extract average (or max) value around each summit window
     if use_max:
         if control_np_tmp_name or sparse_data:
-            # region_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=window_size, operation='max') #change
+            # region_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=window_size, operation='max')
             oneK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=oneK_length, operation='max')
             # tenfiveK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=tenfiveK_length, operation='max')
         fiveK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=fiveK_length, operation='max')
         tenK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=tenK_length, operation='max')
     else:
         if control_np_tmp_name or sparse_data:
-            # region_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=window_size, operation='average') #change
+            # region_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=window_size, operation='average')
             oneK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=oneK_length, operation='average')
             # tenfiveK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=tenfiveK_length, operation='average')
         fiveK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=fiveK_length, operation='average')
         tenK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=tenK_length, operation='average')
 
 
-    # lambda_local = max(lambda_bg, lambda_1k, lambda_5k, lambda_10k)
     if control_np_tmp_name or sparse_data:
-        lambda_local = np.max(np.vstack([oneK_array, fiveK_array, tenK_array]), axis=0)  # change
-        del oneK_array, fiveK_array, tenK_array, summit_abs_pos_array #change
+        lambda_local = np.max(np.vstack([oneK_array, fiveK_array, tenK_array]), axis=0)
+        del oneK_array, fiveK_array, tenK_array, summit_abs_pos_array
     else:
-        lambda_local = np.max(np.vstack([fiveK_array, tenK_array]), axis=0) #change
+        lambda_local = np.max(np.vstack([fiveK_array, tenK_array]), axis=0)
         del fiveK_array, tenK_array, summit_abs_pos_array
     np.clip(lambda_local, a_min=lambda_bg, a_max=None, out=lambda_local)  # memory
 
     return lambda_local
-
-    # TODO:
-    #   1. For memory efficiency, we could only create one array which is tenK_array and slice it along the way
 
 
 def calculate_q_value_local(query_value, lambda_local, result_df,
@@ -1278,12 +829,12 @@ def calculate_q_value_local(query_value, lambda_local, result_df,
                         zip(query_value, param_ls)]
 
     result_df['p_value'] = pvalue_array
-    result_df['query_value'] = query_value # change
-    result_df['lambda_local'] = lambda_local # change
+    result_df['query_value'] = query_value
+    result_df['lambda_local'] = lambda_local
     if control_value:
-        result_df['control_value'] = control_value #6.30
-    result_df['lambda_bg_lower_bound_ind'] = lambda_bg_lower_bound_ind #6.30
-    result_df.sort_values(['p_value'], inplace=True) #need it here? sort it in the end?
+        result_df['control_value'] = control_value
+    result_df['lambda_bg_lower_bound_ind'] = lambda_bg_lower_bound_ind
+    result_df.sort_values(['p_value'], inplace=True)
     if threshold_p:
         result_df = result_df[result_df['p_value'] < threshold_p].copy()
 
@@ -1298,8 +849,8 @@ def calculate_q_value_local(query_value, lambda_local, result_df,
     #if negative_log:
         #result_df['-log(q_value)'] = -np.log10(result_df['q_value'])
 
-
     return result_df
+
 
 def interpolate_poisson_p_value(result_df):
     """
@@ -1311,7 +862,7 @@ def interpolate_poisson_p_value(result_df):
 
     """
     result_df['query_int'] = result_df['query_value'].astype(int)
-    result_df = result_df.round({'lambda_local': 2}) #change
+    result_df = result_df.round({'lambda_local': 2})
     with np.errstate(divide='ignore', invalid='ignore'):
         for query_int, lambda_local in result_df.loc[:, ['query_int', 'lambda_local']].drop_duplicates().values:
             query_int = int(query_int)
@@ -1388,6 +939,7 @@ def calculate_lambda_bg_lower_bound(bandwidth_control, ncuts_treatment, ncuts_co
 def read_chrom_file(file_name):
     with open(file_name, 'r') as file:
         chrom_ls_to_process = [line.strip() for line in file]
+
     return chrom_ls_to_process
 
 
@@ -1397,11 +949,13 @@ def read_chrom_size_file(file_name):
         for line in file:
             line = line.strip().split()
             chr_size_dic[line[0]] = int(line[1])
+
     return chr_size_dic
 
 
 def gaussian_kernel_fft(sig, sigma):
     lw = int(4 * sigma + 0.5)
+
     return fftconvolve(sig, filters._gaussian_kernel1d(sigma, 0, lw), mode='same')
 
 
@@ -1552,14 +1106,3 @@ def bed_chunking(df, df_control, chrom_ls, params):
 
     return chunked_ls
 
-
-# TODO:
-#   1. interpolate_poisson_p_value() needs optimization
-#   3. control_value can calculate before current implementation and filter summits
-#   8. do we want bound by lambda_bg_lower_bound_ind (pseudocount 1 sig value)?
-
-#   5. (done) only read in part of the dataframe, save memory, and specify data type right there
-#   6. (done) if error out, still need to clean tmp files, maybe not?
-#   7. (done) add options for output np.array for easier manipulation
-#   2. (done) consider no calculation of p-value inside run_kde(), directly interpolate all together
-#   4. (delete) run_kde_wo_control needs corrected q value calculation

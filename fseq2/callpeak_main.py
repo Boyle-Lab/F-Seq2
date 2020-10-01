@@ -86,8 +86,6 @@ def main(args):
     threshold *= scaling_factor
     peak_region_threshold *= scaling_factor  # 7.27
     # threshold_control *= scaling_factor
-    # threshold = 3.116 # 4std = 1.657, 8std = 3.116  # speed up for simulated datasets
-    # threshold_control = 0.805 # 4std = 0.500, 8std = 0.805  # speed up for simulated dataset
     if args.control_file:
         lambda_bg_lower_bound = fseq2.calculate_lambda_bg_lower_bound(bandwidth_control=bandwidth_control,
                                                                 ncuts_control=ncuts_control, ncuts_treatment=ncuts,
@@ -98,7 +96,7 @@ def main(args):
         # ncuts_control=ncuts, ncuts_treatment=ncuts,
         # pseudo_count=1)
     lambda_bg_lower_bound *= scaling_factor
-    min_prominence = threshold  # 0.001
+    min_prominence = threshold
     if fragment_size == 0:
         min_distance = args.nfr_upper_limit
         window_size = args.nfr_upper_limit
@@ -107,8 +105,6 @@ def main(args):
         window_size = fragment_size
     distribution_name = 'poisson'
     if args.sig_format:
-        #treatment_np_tmp_name = f'{args.temp_dir_name}/{args.name}_sig.h5'
-        #treatment_chrom_index_name = f'{args.temp_dir_name}/{args.name}_chrom_index.txt'
         sig_float_precision = 2
         gaussian_smooth_sigma = int(1000 / 6)
         if args.sig_format == 'np_array':
@@ -118,9 +114,6 @@ def main(args):
 
 
     if args.v:
-        # print('=====================================', flush=True)
-        # print(f'F-Seq Version {fseq2.__version__}', flush=True)
-        # print('=====================================', flush=True)
         print('#1: Done', flush=True)
         print('#1: Settings:\n', flush=True)
         print(f'\tbandwidth = {bandwidth:.3f}', flush=True)
@@ -133,7 +126,6 @@ def main(args):
             print(f'\tfilter out rate  = {fragment_size_ls[2]:.3f}', flush=True)
         print(f'\tsequence length = {sequence_length}', flush=True)
         print(f'\ttotal cuts = {ncuts}', flush=True)
-        #print('-------------------------------------', flush=True)
         if args.control_file:
             print(f'\n\tcontrol bandwidth = {bandwidth_control:.3f}', flush=True)
             print(f'\tcontrol est. fragment size = {fragment_size_control}', flush=True)
@@ -179,12 +171,6 @@ def main(args):
     else:
         input_param_ls = fseq2.bed_chunking(df=input_bed, df_control=False, chrom_ls=chrom_ls, params=args)
         input_bed = DataFrame()
-    # if args.control_file:
-    #     input_param_ls = [[input_bed[input_bed['chrom'] == chrom]] + [control_bed[control_bed['chrom'] == chrom]] +
-    #                       [chrom, args] for chrom in chrom_ls]
-    # else:
-    #     input_param_ls = [[input_bed[input_bed['chrom'] == chrom]] +
-    #                       [chrom, args] for chrom in chrom_ls]
 
     cpus = args.cpus  # cpus = min(chrom_ls.shape[0], fseq.mp.cpu_count() - 2)
     ctx = mp.get_context('spawn')

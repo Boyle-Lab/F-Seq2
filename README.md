@@ -1,4 +1,5 @@
-# F-Seq2: a feature density estimator for high-throughput sequence tags
+# F-Seq2
+## Improving the feature density based peak caller with dynamic statistics
 
 Tag sequencing using high-throughput sequencing technologies are employed to identify specific sequence features such as 
 DNase-seq, ATAC-seq, ChIP-seq, and FAIRE-seq. To intuitively summarize and display individual sequence data as an 
@@ -7,13 +8,12 @@ accurate and interpretable signal, we have developed the original [F-Seq](http:/
 estimation allowing identification of biologically meaningful sites whose output can be displayed directly in the UCSC 
 Genome Browser. 
 
-F-Seq2 is a complete rewrite and improvement of the original version in Python. F-Seq2 implements a dynamic parameter to 
-conduct statistical analysis in “continuous” Poisson distribution. Combining the dynamic test with the 
-statistically rigorous read distribution modeled by KDE allows us to more robustly account for local bias and solve ties 
-when ranking candidate summits. F-Seq2 reconstructs a more biologically accurate signal by weighting the reads with 
-user-input control data. A higher quality signal leads to better sanity-check data, compare and combine signals 
-from different datasets.
-
+F-Seq2 is a complete rewrite of the original version in Python. We designed a new statistical framework and introduced 
+new features to F-Seq to further improve the performance in its second version. F-Seq2 implements a dynamic 
+parameter to conduct local statistical analysis with an underlying “continuous” Poisson distribution. By combining the 
+power of the local test and the KDE, which model the read probability distribution with statistical rigor, we robustly 
+account for local biases and solve ties that occur when ranking candidate summits, making results suitable for 
+irreproducible discovery rate (IDR) analysis.
 
 
 ## Table of contents
@@ -31,7 +31,8 @@ from different datasets.
 
 
 ## Installation
-See [here](./INSTALL.md).
+Prerequisite: [BEDTools](https://bedtools.readthedocs.io/en/latest/content/installation.html).  
+See [here](./INSTALL.md) for more details to install F-Seq2.
 
 
 
@@ -101,7 +102,7 @@ Threshold (standard deviations) to call candidate summits. Default is 4.0. Recom
 8.0 for sharp peaks.
 
 ##### `-p_thr`
-P value threshold. Default is 0.01.
+P value threshold. Default is 0.01. Consider to relax it to 0.05 when without control data or calling broad peaks.
 
 ##### `-q_thr`
 Q value (FDR) threshold. Default is not set and use `p_thr`. If set, only use `q_thr`.
@@ -109,13 +110,29 @@ Q value (FDR) threshold. Default is not set and use `p_thr`. If set, only use `q
 ##### `-cpus`
 Number of cpus to use. Default is 1.
 
+##### `-tp`
+Threshold (standard deviations) to call peak regions. Default is 4.0.
+
+##### `-sparse_data`
+If flag on, statistical test includes 1k region for more accurate background estimation. This can be useful for single-cell data.
+
 ##### `-nfr_upper_limit`
 Nucleosome free region upper limit. Default is 150. Used as window_size and min_distance when `-f 0`.
 
 ##### `-pe_fragment_size_range`
-Effective only if `-pe` on. Keep PE fragments whose size within the range. Default is False, without any selection. Useful for ATAC-seq data:  
-(1) to call peaks on nucleosome free regions, specify: 0 150  
-(2) to call peaks on nucleosome centers, specify: 150 inf
+Effective only if `-pe` on. Only keep PE fragments whose size within the range to call peaks. Default is False, 
+without any selection. Useful for ATAC-seq data:  
+(1) to call peaks on nucleosome free regions, specify: `0 150`  
+(2) to call peaks on nucleosome centers, specify: `150 inf`  
+(3) to call peaks on open chromatin regions, specify: `auto`  
+> `auto` is a filter designed for ATAC-seq open chromatin peak calling where we filter out fragments whose size related to 
+mono-, di-, tri-, and multi-nucleosomes. Size information is taken from the original ATAC-seq paper (Buenrostro et al.). 
+You can design your own auto filter based on specific experiment data by specifying `-nucleosome_size` parameter.
+
+##### `-nucleosome_size`
+Effective only if `-pe` on and specify `-pe_fragment_size_range auto`. Default is `180, 247, 315, 473, 558, 615` They 
+are the ATAC-seq PE fragment sizes related to mono-, di-, and tri-nucleosomes. Fragments whose size within the ranges 
+and above the largest bound (i.e. 615) are filtered out when calling peaks. Change those numbers to design your own auto filter.
 
 ##### `-prior_pad_summit`
 Prior knowledge about peak length which only padded into `NAME_summits.narrowPeak`. Default is 0. 
@@ -225,7 +242,7 @@ $ fseq2 callpeak treatment_file.bam -f 0 -l 600 -t 4.0 -v -cpus 5
 #### ATAC-seq data
 Paired-end ATAC-seq data, and call peaks on open chromatin regions, without calling on nucleosomes
 ```
-$ fseq2 callpeak treatment_file.bam -f 0 -l 600 -t 4.0 -pe -nfr_upper_limit 150 -pe_fragment_size_range 0 150
+$ fseq2 callpeak treatment_file.bam -f 0 -l 600 -t 4.0 -pe -nfr_upper_limit 150 -pe_fragment_size_range auto
 ```
 
 #### ChIP-seq data
@@ -255,10 +272,13 @@ Solution:
 try with less CPUs
 
 
-##### 3. `NotImplementedError: "bamToBed" does not appear to be installed`
+##### 3. `NotImplementedError: "xx" does not appear to be installed or on the path, so this method is disabled.  Please install a more recent version of BEDTools and re-import to use this method.`
 
 Solution:  
-update bedtools >= 2.29.0
+update or install bedtools >= 2.29.0  
+Or  
+one should copy the binaries in `bedtools2/bin/` to either `usr/local/bin/` or some other repository for commonly used 
+UNIX tools in your environment.
 
 
 ##### 4. Warnings when `-pe`

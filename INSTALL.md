@@ -52,7 +52,6 @@ This may take 1 min
 - numpy
 - scipy >= 0.13
 - pandas >= 0.24
-- numba 
 - statsmodels
 - KDEpy
 - pybedtools
