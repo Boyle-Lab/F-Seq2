@@ -27,6 +27,8 @@ def main(temp_dir_name):
 
     args = parser.parse_args()
 
+    if args.p_thr == 'False':
+        args.p_thr = False
     if args.o:
         if not os.path.exists(args.o):
             try:
@@ -117,13 +119,19 @@ def add_callpeak_arg(subparser):
                                     help='Threshold (standard deviations) to call candidate summits. Default is 4.0. '
                                          'Recommend 4.0 for broad peaks, 8.0 for sharp peaks.',
                                     default=4.0, type=float)
-    parser_group_param.add_argument('-p_thr', help="P value threshold. Default is 0.01.", default=0.01, type=float)
+    parser_group_param.add_argument('-p_thr', help="P value threshold. Default is 0.01.", default=0.01)
     parser_group_param.add_argument('-q_thr',
                                     help="Q value (FDR) threshold. Default is not set and use p_thr. If set, only use q_thr.",
                                     default=False, type=float)
     parser_group_param.add_argument('-cpus', help='Number of cpus to use. Default is 1.',
                                     default=1,
                                     type=int)
+    parser_group_param.add_argument('-tp',
+                                    help='Threshold (standard deviations) to call peak regions. Default is 4.0.',
+                                    default=4.0, type=float)
+    parser_group_param.add_argument('-sparse_data', help='If flag on, statistical test includes 1k region for more '
+                                                         'accurate background estimation. This can be useful '
+                                                         'for single-cell data.', default=False, action='store_true')
 
     # ATAC-seq related arguments
     parser_group_atac = parser_callpeak.add_argument_group("Useful ATAC-seq arguments")
@@ -132,11 +140,21 @@ def add_callpeak_arg(subparser):
                                         'min_distance when -f 0.',
                                    default=150, type=int)
     parser_group_atac.add_argument('-pe_fragment_size_range',
-                                   help='Effective only if -PE on. Keep PE fragments whose size within the range. '
-                                        'Default is False, without any selection. Useful for ATAC-seq data: '
+                                   help='Effective only if -PE on. Only keep PE fragments whose size within the range to call peaks. '
+                                        'Default is False, without any selection. Useful for ATAC-seq data:'
                                         '(1) to call peaks on nucleosome free regions, specify: 0 150 '
-                                        '(2) to call peaks on nucleosome centers, specify: 150 inf',
+                                        '(2) to call peaks on nucleosome centers, specify: 150 inf '
+                                        '(3) to call peaks on open chromatin regions, specify: auto '
+                                        'Auto is a filter designed for ATAC-seq where we filter out fragments whose size '
+                                        'related to mono-, di-, tri-, and multi-nucleosomes. Size information is taken '
+                                        'from original ATAC-seq paper. You can design your own based on specific '
+                                        'experiment data using -nucleosome_size parameter.',
                                    nargs='+', default=False)
+    parser_group_atac.add_argument('-nucleosome_size',
+                                   help='Effective only if -PE on and specify -pe_fragment_size_range auto. Default is 180, 247, 315, 473, 558, 615 '
+                                        'They are the ATAC-seq PE fragment sizes related to mono-, di-, and tri-nucleosomes. '
+                                        'Those fragments are filtered out when calling peaks. Change those numbers to design your own filter.',
+                                   nargs='+', default=[180, 247, 315, 473, 558, 615])
 
     # IDR related arguments
     parser_group_idr = parser_callpeak.add_argument_group("Useful IDR arguments")
@@ -220,19 +238,36 @@ def add_callpeak_idr_arg(subparser):
     parser_group_param.add_argument('-cpus', help='Number of cpus to use. Default is 1.',
                                     default=1,
                                     type=int)
+    parser_group_param.add_argument('-tp',
+                                    help='Threshold (standard deviations) to call peak regions. Default is 4.0.',
+                                    default=4.0, type=float)
+    parser_group_param.add_argument('-sparse_data', help='If flag on, statistical test includes 1k region for more '
+                                                         'accurate background estimation. This can be useful '
+                                                         'for single-cell data.', default=False, action='store_true')
 
-    # # ATAC-seq related arguments
-    # parser_group_atac = parser_callpeak_idr.add_argument_group("Useful ATAC-seq arguments")
-    # parser_group_atac.add_argument('-nfr_upper_limit',
-    #                                help='Nucleosome free region upper limit. Default is 150 bp. Used as '
-    #                                     'window_size and min_distance when fragment size (-f) set to 0.',
-    #                                default=150, type=int)
-    # parser_group_atac.add_argument('-pe_fragment_size_range',
-    #                                help='Only keep paired-end fragments whose size within the range. '
-    #                                     'Default is to select nucleosome free regions for ATAC-seq data, '
-    #                                     'i.e. [0, 150]. To call peaks on nucleosome centers, specify: '
-    #                                     '150 inf. Keep all, no filtering specify: False',
-    #                                nargs='+', default=[0, 150])
+    # ATAC-seq related arguments
+    parser_group_atac = parser_callpeak_idr.add_argument_group("Useful ATAC-seq arguments")
+    parser_group_atac.add_argument('-nfr_upper_limit',
+                                   help='Nucleosome free region upper limit. Default is 150. Used as window_size and '
+                                        'min_distance when -f 0.',
+                                   default=150, type=int)
+    parser_group_atac.add_argument('-pe_fragment_size_range',
+                                   help='Effective only if -PE on. Only keep PE fragments whose size within the range to call peaks. '
+                                        'Default is False, without any selection. Useful for ATAC-seq data:'
+                                        '(1) to call peaks on nucleosome free regions, specify: 0 150 '
+                                        '(2) to call peaks on nucleosome centers, specify: 150 inf '
+                                        '(3) to call peaks on open chromatin regions, specify: auto '
+                                        'Auto is a filter designed for ATAC-seq where we filter out fragments whose size '
+                                        'related to mono-, di-, tri-, and multi-nucleosomes. Size information is taken '
+                                        'from original ATAC-seq paper. You can design your own based on specific '
+                                        'experiment data using -nucleosome_size parameter.',
+                                   nargs='+', default=False)
+    parser_group_atac.add_argument('-nucleosome_size',
+                                   help='Effective only if -PE on and specify -pe_fragment_size_range auto. Default is 180, 247, 315, 473, 558, 615 '
+                                        'They are the ATAC-seq PE fragment sizes related to mono-, di-, and tri-nucleosomes. '
+                                        'Those fragments are filtered out when calling peaks. Change those numbers to design your own filter.',
+                                   nargs='+', default=[180, 247, 315, 473, 558, 615])
+
 
     # IDR related arguments
     parser_group_idr = parser_callpeak_idr.add_argument_group("Useful IDR arguments")

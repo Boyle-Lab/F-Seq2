@@ -20,14 +20,14 @@ import numpy as np
 import pandas as pd
 import pyBigWig
 import pybedtools
-from numba import jit
 from scipy import stats
 from scipy.ndimage import filters
 from scipy.signal import find_peaks, fftconvolve
 from statsmodels.stats.multitest import multipletests
+#from numba import jit
 
 
-def read_in_file(file_name, pe, pe_fragment_size_range, chrom_ls_to_process):
+def read_in_file(file_name, pe, pe_fragment_size_range, nucleosome_size, chrom_ls_to_process):
     """ Read in file(s).
     """
     if not pe:
@@ -44,6 +44,7 @@ def read_in_file(file_name, pe, pe_fragment_size_range, chrom_ls_to_process):
                             bed['end'] * (bed['strand'] == '-')
         fragment_size_before_filter = np.NaN
         fragment_size_after_filter = np.NaN
+        filter_out_rate = np.NaN
 
     else:
         if file_name[0][-3:] == 'bam':
@@ -65,13 +66,28 @@ def read_in_file(file_name, pe, pe_fragment_size_range, chrom_ls_to_process):
         bed = bed.loc[:, ['chrom', 'start_new', 'end_new', 'strand', 'cuts']]
         bed.rename(columns={'start_new': 'start', 'end_new': 'end'}, inplace=True)
         fragment_size_before_filter = (bed['end'] - bed['start']).mean()
-        if pe_fragment_size_range[0] != 'False':
-            if pe_fragment_size_range[1] != 'inf':
-                bed = bed.loc[((bed['end'] - bed['start']) >= pe_fragment_size_range[0]) &
-                              ((bed['end'] - bed['start']) <= pe_fragment_size_range[1]), :]
+        fragment_count_before_filter = bed.shape[0]
+        if pe_fragment_size_range is not False:
+            if pe_fragment_size_range[0] != 'auto':
+                pe_fragment_size_range[0] = int(pe_fragment_size_range[0])
+                if pe_fragment_size_range[1] != 'inf':
+                    pe_fragment_size_range[1] = int(pe_fragment_size_range[1])
+                    bed = bed.loc[((bed['end'] - bed['start']) >= pe_fragment_size_range[0]) &
+                                  ((bed['end'] - bed['start']) <= pe_fragment_size_range[1]), :]
+                else:
+                    bed = bed.loc[((bed['end'] - bed['start']) >= pe_fragment_size_range[0]), :]
             else:
-                bed = bed.loc[((bed['end'] - bed['start']) >= pe_fragment_size_range[0]), :]
+                mononucleosome_range = [nucleosome_size[0], nucleosome_size[1]] # [180, 247]
+                dinucleosome_range = [nucleosome_size[2], nucleosome_size[3]] # [315, 473]
+                trinucleosome_range = [nucleosome_size[4], nucleosome_size[5]] # [558, 615]
+                fragment_length_series = (bed['end'] - bed['start'])
+                mask = ((fragment_length_series >= mononucleosome_range[0]) & (fragment_length_series <= mononucleosome_range[1])) | (
+                    (fragment_length_series >= dinucleosome_range[0]) & (fragment_length_series <= dinucleosome_range[1])) | (
+                    (fragment_length_series >= trinucleosome_range[0]))# & (fragment_length_series <= trinucleosome_range[1]))
+                bed = bed.loc[~mask, :]
         fragment_size_after_filter = (bed['end'] - bed['start']).mean()
+        fragment_count_after_filter = bed.shape[0]
+        filter_out_rate = float(fragment_count_before_filter - fragment_count_after_filter) / fragment_count_before_filter
 
     if chrom_ls_to_process:
          bed = bed.loc[bed['chrom'].isin(chrom_ls_to_process)]
@@ -82,7 +98,7 @@ def read_in_file(file_name, pe, pe_fragment_size_range, chrom_ls_to_process):
     #   1. make sure pe reads on the same chrom
     #   2. samtools sort -n in.bam -o out.bam <= bedtools -BEDPE requires bam sorted by name
 
-    return bed, [fragment_size_before_filter, fragment_size_after_filter]
+    return bed, [fragment_size_before_filter, fragment_size_after_filter, filter_out_rate]
 
 
 
@@ -156,7 +172,7 @@ def calculate_bandwidth(feature_length):
     return bandwidth
 
 
-def calculate_threshold(size, ncuts, std, bandwidth):
+def calculate_threshold(size, ncuts, std, std_p, bandwidth):
     """Calculate threshold for peak calling.
 
     Input:
@@ -196,7 +212,7 @@ def calculate_threshold(size, ncuts, std, bandwidth):
 
     threshold = np.mean(kdepy_result) + std * np.std(kdepy_result)
 
-    peak_region_threshold = np.mean(kdepy_result) + 4 * np.std(kdepy_result) #7.27
+    peak_region_threshold = np.mean(kdepy_result) + std_p * np.std(kdepy_result) #7.27
 
     return threshold, peak_region_threshold #7.27
 
@@ -344,7 +360,7 @@ def run_kde(cuts_array, start_array, end_array, strand_array,
     with lock:
         lambda_local = find_local_lambda(control_np_tmp=control_np_tmp, control_np_tmp_name=control_np_tmp_name,
                                          summit_abs_pos_array=summit_abs_pos_array, lambda_bg=lambda_bg,
-                                         window_size=params.window_size, use_max=False)
+                                         window_size=params.window_size, sparse_data=params.sparse_data, use_max=False)
         # memory intensive, only allow one process
     del control_np_tmp, summit_abs_pos_array
 
@@ -454,7 +470,7 @@ def run_kde_wo_control(cuts_array, start_array, end_array, strand_array, chrom, 
     with lock:
         lambda_local = find_local_lambda(control_np_tmp=kdepy_result, control_np_tmp_name=False,
                                          summit_abs_pos_array=summit_abs_pos_array, lambda_bg=lambda_bg,
-                                         window_size=params.window_size, use_max=False)
+                                         window_size=params.window_size, sparse_data=params.sparse_data, use_max=False)
     #del control_np_tmp, summit_abs_pos_array
 
     # prepare for interpolation of p value and q value calculation
@@ -1176,39 +1192,41 @@ def extract_value_around_window(result_sig, summit_abs_pos_array, window_length,
     return window_length_array.astype(np.float32)  # memory
 
 
-def find_local_lambda(control_np_tmp, control_np_tmp_name, summit_abs_pos_array, lambda_bg, window_size, use_max=False):
+def find_local_lambda(control_np_tmp, control_np_tmp_name, summit_abs_pos_array, lambda_bg, window_size,
+                      sparse_data=False, use_max=False):
     """Find local lambda.
     Memory heavy.
 
     Return:
-        lambda_local: (np.array) max lambda for each summit
+        lambda_local: (np.array) max or average lambda for each summit
     """
     # 3. find all local lambda
-    oneK_length = 1000; fiveK_length = 5000; tenK_length = 10000
+    oneK_length = 1000; fiveK_length = 5000; tenK_length = 10000; tenfiveK_length = 15000
 
     # extract average (or max) value around each summit window
     if use_max:
-        tenK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=tenK_length, operation='max')
-        fiveK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=fiveK_length, operation='max')
-        oneK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=oneK_length, operation='max') #change
-        if control_np_tmp_name:
-            #region_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=window_size, operation='max') #change
+        if control_np_tmp_name or sparse_data:
+            # region_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=window_size, operation='max') #change
             oneK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=oneK_length, operation='max')
+            # tenfiveK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=tenfiveK_length, operation='max')
+        fiveK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=fiveK_length, operation='max')
+        tenK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=tenK_length, operation='max')
     else:
-        tenK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=tenK_length, operation='average')
-        fiveK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=fiveK_length, operation='average')
-        oneK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=oneK_length, operation='average') #change
-        if control_np_tmp_name:
-            #region_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=window_size, operation='average') #change
+        if control_np_tmp_name or sparse_data:
+            # region_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=window_size, operation='average') #change
             oneK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=oneK_length, operation='average')
+            # tenfiveK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=tenfiveK_length, operation='average')
+        fiveK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=fiveK_length, operation='average')
+        tenK_array = extract_value_around_window(control_np_tmp, summit_abs_pos_array, window_length=tenK_length, operation='average')
 
-    # lambda_local = max(lambda_bg, lambda_region, lambda_1k, lambda_5k, lambda_10k)
-    if control_np_tmp_name:
+
+    # lambda_local = max(lambda_bg, lambda_1k, lambda_5k, lambda_10k)
+    if control_np_tmp_name or sparse_data:
         lambda_local = np.max(np.vstack([oneK_array, fiveK_array, tenK_array]), axis=0)  # change
         del oneK_array, fiveK_array, tenK_array, summit_abs_pos_array #change
     else:
-        lambda_local = np.max(np.vstack([oneK_array, fiveK_array, tenK_array]), axis=0) #change
-        del fiveK_array, tenK_array, summit_abs_pos_array, oneK_array
+        lambda_local = np.max(np.vstack([fiveK_array, tenK_array]), axis=0) #change
+        del fiveK_array, tenK_array, summit_abs_pos_array
     np.clip(lambda_local, a_min=lambda_bg, a_max=None, out=lambda_local)  # memory
 
     return lambda_local
@@ -1294,7 +1312,7 @@ def interpolate_poisson_p_value(result_df):
     """
     result_df['query_int'] = result_df['query_value'].astype(int)
     result_df = result_df.round({'lambda_local': 2}) #change
-    with np.errstate(divide='ignore'):
+    with np.errstate(divide='ignore', invalid='ignore'):
         for query_int, lambda_local in result_df.loc[:, ['query_int', 'lambda_local']].drop_duplicates().values:
             query_int = int(query_int)
             rows_to_select = (result_df['query_int'] == query_int) & (result_df['lambda_local'] == lambda_local)
@@ -1338,13 +1356,13 @@ def calculate_q_value(result_df, p_thr, q_thr, num_peaks):
         result_df = result_df.head(num_peaks)
     elif q_thr is not False:
         result_df = result_df.loc[(result_df['q_value'] > -np.log10(q_thr)), :]
-    elif p_thr is not False:
+    elif (p_thr is not False) and (p_thr != 'False'):
         result_df = result_df.loc[(result_df['-log10_p_value_interpolated'] > -np.log10(p_thr)), :]
 
     return result_df
 
 
-@jit
+# @jit
 def calculate_nbinom_param(mu, var):
     """Input (mu, var), output (p, r)
     """
@@ -1352,7 +1370,7 @@ def calculate_nbinom_param(mu, var):
     return p, p * mu / (1 - p)
 
 
-@jit
+# @jit
 def calculate_binom_param(mu, var):
     """Input (mu, var), output (p, n)
     """

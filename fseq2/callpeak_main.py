@@ -31,7 +31,7 @@ def main(args):
 
     ### 1.1 deal with input (treatment) ###
     input_bed, fragment_size_ls = fseq2.read_in_file(args.treatment_file, args.pe, args.pe_fragment_size_range,
-                                               chrom_ls_to_process)
+                                                     args.nucleosome_size, chrom_ls_to_process)
 
     # parameters for input
     feature_length = args.l
@@ -47,14 +47,14 @@ def main(args):
     ncuts = input_bed.shape[0]
 
     threshold, peak_region_threshold = fseq2.calculate_threshold(size=input_bed.groupby('chrom')['cuts'].agg(ptp).sum(),
-                                                           ncuts=ncuts, std=args.t, bandwidth=bandwidth)  # 7.27
+                                                           ncuts=ncuts, std=args.t, std_p=args.tp, bandwidth=bandwidth)  # 7.27
     sequence_length = input_bed.iloc[0, 2] - input_bed.iloc[0, 1]
 
 
     ### 1.2 deal with control ###
     if args.control_file:
         control_bed, fragment_size_ls_control = fseq2.read_in_file(args.control_file, args.pe, args.pe_fragment_size_range,
-                                                             chrom_ls_to_process)
+                                                                   args.nucleosome_size, chrom_ls_to_process)
 
         # parameters for control
         feature_length_control = feature_length * 20  # 7.21
@@ -130,6 +130,7 @@ def main(args):
         if args.pe:
             print(f'\tavg. pe fragment size before filter = {fragment_size_ls[0]:.3f}', flush=True)
             print(f'\tavg. pe fragment size after filter = {fragment_size_ls[1]:.3f}', flush=True)
+            print(f'\tfilter out rate  = {fragment_size_ls[2]:.3f}', flush=True)
         print(f'\tsequence length = {sequence_length}', flush=True)
         print(f'\ttotal cuts = {ncuts}', flush=True)
         #print('-------------------------------------', flush=True)
@@ -139,6 +140,7 @@ def main(args):
             if args.pe:
                 print(f'\tcontrol avg. pe fragment size before filter = {fragment_size_ls_control[0]:.3f}', flush=True)
                 print(f'\tcontrol avg. pe fragment size after filter = {fragment_size_ls_control[1]:.3f}', flush=True)
+                print(f'\tcontrol filter out rate  = {fragment_size_ls_control[2]:.3f}', flush=True)
             print(f'\tcontrol sequence length = {sequence_length_control}', flush=True)
             print(f'\tcontrol total cuts = {ncuts_control}', flush=True)
         print('\n-------------------------------------', flush=True)
