@@ -1,3 +1,15 @@
+[![PyPI version](https://badge.fury.io/py/fseq2.svg)](https://badge.fury.io/py/fseq2)
+[![Conda](https://img.shields.io/conda/v/samzhao/fseq2)](https://anaconda.org/samzhao/fseq2)
+[![GitHub](https://img.shields.io/github/license/Boyle-Lab/F-Seq2)](https://github.com/Boyle-Lab/F-Seq2/blob/master/LICENSE)
+<br/>
+
+ |Host | Downloads |
+ |-----|-----------|
+ |PyPI |[![Downloads](https://pepy.tech/badge/fseq2)](https://pepy.tech/project/fseq2)|
+ |conda|[![Conda](https://img.shields.io/conda/dn/samzhao/fseq2)](https://anaconda.org/samzhao/fseq2)|
+
+
+
 # F-Seq2
 ## Improving the feature density based peak caller with dynamic statistics
 
