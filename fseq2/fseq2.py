@@ -6,7 +6,7 @@
 
 __author__ = 'Nanxiang(Samuel) Zhao'
 __email__ = 'samzhao@umich.edu'
-__version__ = 2.0
+__version__ = '2.0.1'
 
 import functools
 import math
@@ -908,7 +908,7 @@ def calculate_q_value(result_df, p_thr, q_thr, num_peaks):
     elif q_thr is not False:
         result_df = result_df.loc[(result_df['q_value'] > -np.log10(q_thr)), :]
     elif (p_thr is not False) and (p_thr != 'False'):
-        result_df = result_df.loc[(result_df['-log10_p_value_interpolated'] > -np.log10(p_thr)), :]
+        result_df = result_df.loc[(result_df['-log10_p_value_interpolated'] > -np.log10(float(p_thr))), :]
 
     return result_df
 
@@ -988,14 +988,14 @@ def output_sig(sig_format, treatment_np_tmp_name, out_dir, out_name, chr_size_di
                         #                                    sigma=gaussian_smooth_sigma).astype(np.float64)
                         kdepy_result = np.round(gaussian_kernel_fft(sig_file[chrom_line][:], sigma=gaussian_smooth_sigma),
                                                  sig_float_precision).astype(np.float16)
-                        kdepy_result[kdepy_result == 0] = np.NaN
+                        #kdepy_result[kdepy_result == 0] = np.NaN
                         output_bw.addEntries(chrom_line, int(sig_file.attrs[chrom_line]), values=kdepy_result, span=1,
                                              step=1)
                 else:
                     for chrom_line in chrom_line_ls:
                         #kdepy_result = sig_file[chrom_line][:].astype(np.float64)
                         kdepy_result = np.round(sig_file[chrom_line][:], sig_float_precision).astype(np.float16)
-                        kdepy_result[kdepy_result == 0] = np.NaN
+                        #kdepy_result[kdepy_result == 0] = np.NaN
                         output_bw.addEntries(chrom_line, int(sig_file.attrs[chrom_line]), values=kdepy_result, span=1,
                                              step=1)
 
@@ -1052,11 +1052,16 @@ def narrowPeak_writer(result_df, peak_type, name, out_dir, prior_pad_summit=0, s
 
         result_df.sort_values(['chrom', 'start'], inplace=True)
         result_df['summit'] = result_df['summit'] - result_df['start']
+        try:
+            result_df = pybedtools.BedTool.from_dataframe(result_df).merge(c=[5, 4, 5, 6, 7],
+                                                                           o=[score_method_for_peaks, 'collapse',
+                                                                              'collapse', 'collapse',
+                                                                              'collapse']).to_dataframe()
+        except:
+            if result_df.empty:
+                result_df.to_csv(f'{out_dir}/{name}_peaks.narrowPeak', sep='\t', header=None, index=None)
+                return
 
-        result_df = pybedtools.BedTool.from_dataframe(result_df).merge(c=[5, 4, 5, 6, 7],
-                                                                       o=[score_method_for_peaks, 'collapse',
-                                                                          'collapse', 'collapse',
-                                                                          'collapse']).to_dataframe()
         if sort_by == 'pValue':
             result_df.sort_values(['strand'], ascending=False, inplace=True)
         elif sort_by == 'chromAndStart':

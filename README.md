@@ -120,7 +120,7 @@ P value threshold. Default is 0.01. Consider to relax it to 0.05 when without co
 Q value (FDR) threshold. Default is not set and use `p_thr`. If set, only use `q_thr`.
 
 ##### `-cpus`
-Number of cpus to use. Default is 1.
+Number of cores to use. Default is 1.
 
 ##### `-tp`
 Threshold (standard deviations) to call peak regions. Default is 4.0.

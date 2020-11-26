@@ -21,7 +21,7 @@ $ conda activate fseq2_env
 $ pip install fseq2
 
 # or conda
-$ conda install fseq2
+$ conda install -c bioconda -c dmentipl -c samzhao fseq2
 ```
 
 ### Install from source
@@ -49,8 +49,8 @@ This may take 1 min
 
 ### Packages installed after installation
 
-- numpy
-- scipy >= 0.13
+- numpy >= 1.15.4
+- scipy >= 1.1.0
 - pandas >= 0.24
 - statsmodels
 - KDEpy
