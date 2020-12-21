@@ -201,7 +201,7 @@ def main(args):
 
     #result_df.to_hdf(path_or_buf=f'{args.o}/{args.name}.h5', key='result_df', mode='w')  # for inspection
     if args.prior_pad_summit == 'fragment_size':
-        args.prior_pad_summit = fragment_size
+        args.prior_pad_summit = min_distance
     fseq2.narrowPeak_writer(result_df=result_df, peak_type='summit', name=args.name, out_dir=args.o,
                       prior_pad_summit=args.prior_pad_summit, sort_by=args.sort_by)
     fseq2.narrowPeak_writer(result_df=result_df, peak_type='peak', name=args.name, out_dir=args.o, sort_by=args.sort_by)

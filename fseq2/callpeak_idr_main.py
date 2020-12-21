@@ -19,7 +19,12 @@ def main(args):
     if args.v:
         print(f'Workflow#1: fseq{fseq_version} callpeak with treatment_file_1, control_file_0', flush=True)
     args.treatment_file = [args.treatment_file_1]
-    args.control_file = [args.control_file_1, args.control_file_2]
+    if args.control_file_1 is None:
+        args.control_file = False
+    elif args.control_file_2 is None:
+        args.control_file = [args.control_file_1]
+    else:
+        args.control_file = [args.control_file_1, args.control_file_2]
     args.name = args.name_1
     args.sort_by = 'pValue'
     args.num_peaks = 300000

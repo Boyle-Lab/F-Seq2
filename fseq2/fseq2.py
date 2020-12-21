@@ -6,7 +6,7 @@
 
 __author__ = 'Nanxiang(Samuel) Zhao'
 __email__ = 'samzhao@umich.edu'
-__version__ = '2.0.1'
+__version__ = '2.0.2'
 
 import functools
 import math
@@ -1063,7 +1063,8 @@ def narrowPeak_writer(result_df, peak_type, name, out_dir, prior_pad_summit=0, s
                 return
 
         if sort_by == 'pValue':
-            result_df.sort_values(['strand'], ascending=False, inplace=True)
+            result_df.sort_values(['name'], ascending=False, inplace=True)
+            # result_df.sort_values(['strand'], ascending=False, inplace=True)
         elif sort_by == 'chromAndStart':
             result_df.sort_values(['chrom', 'start'], inplace=True)
 
