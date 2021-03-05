@@ -54,7 +54,7 @@ def main(temp_dir_name):
         submain(args)
     elif args.subcommand == 'idr':
         from fseq2.idr_main import main as submain
-        if args.v:
+        if not args.quiet:
             print(f'PROGRAM: fseq{__version__} idr', flush=True)
         submain(args)
 
@@ -103,6 +103,12 @@ def add_callpeak_arg(subparser):
     parser_group_output_files.add_argument('-sort_by',
                                            help="Sort peaks and summits by pValue or chromAndStart. Default is chromAndStart.",
                                            default='chromAndStart')
+    parser_group_output_files.add_argument('-standard_narrowpeak',
+                                           help="If flag on, NAME_peaks.narrowPeak is in standard narrowPeak format. "
+                                                "It contains max pvalue summits rather than all summits for each peak region. "
+                                                "Compatible to visualization on UCSC genome browser and to other downstream softwares.",
+                                           default=False,
+                                           action='store_true')
     parser_group_output_files.add_argument('-v', help='Verbose output. Default is False.', default=False, action='store_true')
 
     # general parameter related arguments
@@ -217,6 +223,12 @@ def add_callpeak_idr_arg(subparser):
     # parser_group_output_files.add_argument('-sort_by',
     #                                        help="Sort peaks and summits by pValue or chromAndStart. Default is chromAndStart.",
     #                                        default='chromAndStart')
+    parser_group_output_files.add_argument('-standard_narrowpeak',
+                                           help="If flag on, NAME_peaks.narrowPeak is in standard narrowPeak format. "
+                                                "It contains max pvalue summits rather than all summits for each peak region. "
+                                                "Compatible to visualization on UCSC genome browser and to other downstream softwares.",
+                                           default=False,
+                                           action='store_true')
     parser_group_output_files.add_argument('-v', help='Verbose output. Default is False', default=False, action='store_true')
 
     # general parameter related arguments

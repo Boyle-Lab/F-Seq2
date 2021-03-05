@@ -95,6 +95,10 @@ for each chrom are stored in [`NAME_sig.h5`](#name_sigh5) with `chrom` as key, a
 ##### `-sort_by`
 Sort peaks and summits by `pValue` or `chromAndStart`. Default is `chromAndStart`.
 
+##### `-standard_narrowpeak`
+If flag on, `NAME_peaks.narrowPeak` is in standard `.narrowPeak` format, which contains max pvalue summits rather than all summits for each peak region.
+Compatible to visualization on UCSC genome browser and convenient for other downstream softwares. 
+
 ##### `-v`
 Verbose output. Default is False.  
 
@@ -217,7 +221,8 @@ BED6+4 format
   
 #### `NAME_peaks.narrowPeak` 
 Similar to summit file except that it can contain multiple summits information. 
-For 7-10 columns, if multiple summits in a peak, output a comma separated list for each column.
+For 7-10 columns, if multiple summits in a peak, output a comma separated list for each column. This behavior can be 
+turned off by `-standard_narrowpeak` to output single value columns.
 1. chrom
 2. chromStart 
 3. chromEnd 

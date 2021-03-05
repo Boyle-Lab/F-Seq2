@@ -76,7 +76,7 @@ def prepare_idr_arg(args):
     args.output_file = f'{args.name_1}_{args.name_2}_conservative_IDR_thresholded_peaks.narrowPeak'
     args.output_file_type = 'narrowPeak'
     if args.plot:
-        args.plot = f'{args.name_1}_{args.name_2}.png'
+        args.plot = f'{args.name_1}_{args.name_2}'
     args.verbose = False
     args.quiet = not args.v
 

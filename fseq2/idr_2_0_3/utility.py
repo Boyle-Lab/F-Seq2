@@ -48,15 +48,15 @@ def py_compute_pseudo_values(ranks, signal_mu, signal_sd, p,
     return numpy.array(pseudo_values)
 
 # import the inverse cdf functions
-try: 
-    from idr.inv_cdf import cdf, cdf_i, c_compute_pseudo_values
+try:
+    from fseq2.idr_2_0_3.inv_cdf import cdf, cdf_i, c_compute_pseudo_values
     def compute_pseudo_values(r, mu, sigma, rho, EPS=DEFAULT_PV_COVERGE_EPS):
         z = numpy.zeros(len(r), dtype=float)
         res = c_compute_pseudo_values(r, z, mu, sigma, rho, EPS)
         return res
 except ImportError:
-    # print( "WARNING: Cython does not appear to be installed." +
-    #        "- falling back to much slower python method." )
+    print( "WARNING: Cython does not appear to be installed." +
+            "- falling back to much slower python method." )
     cdf = py_cdf
     cdf_i = py_cdf_i
     compute_pseudo_values = py_compute_pseudo_values

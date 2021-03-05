@@ -2,9 +2,10 @@
 
 """The setup script."""
 
-from setuptools import setup, find_packages
+from setuptools import setup, find_packages, Extension
 import sys
 from pathlib import Path
+import numpy
 
 # with open('README.rst') as readme_file:
 #     readme = readme_file.read()
@@ -26,6 +27,20 @@ requirements = ['numpy >= 1.15.4', 'scipy >= 1.1.0', 'pandas >= 0.24', 'statsmod
 setup_requirements = ['pytest-runner']
 
 test_requirements = ['pytest>=3']
+
+try:
+    from Cython.Build import cythonize
+    extensions = cythonize([
+        Extension("fseq2.idr_2_0_3.inv_cdf",
+                  ["fseq2/idr_2_0_3/inv_cdf.pyx", ],
+                  include_dirs=[numpy.get_include()]),
+    ])
+except ImportError:
+    extensions = [
+        Extension("fseq2.idr_2_0_3.inv_cdf",
+                  ["fseq2/idr_2_0_3/inv_cdf.c", ],
+                  include_dirs=[numpy.get_include()]),
+    ]
 
 setup(
     author="Nanxiang Zhao (Samuel)",
@@ -54,6 +69,7 @@ setup(
     test_suite='tests',
     tests_require=test_requirements,
     url='https://github.com/Boyle-Lab/F-Seq2',
-    version='2.0.2',
+    version='2.0.3',
     zip_safe=False,
+    ext_modules = extensions
 )

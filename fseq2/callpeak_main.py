@@ -204,7 +204,8 @@ def main(args):
         args.prior_pad_summit = min_distance
     fseq2.narrowPeak_writer(result_df=result_df, peak_type='summit', name=args.name, out_dir=args.o,
                       prior_pad_summit=args.prior_pad_summit, sort_by=args.sort_by)
-    fseq2.narrowPeak_writer(result_df=result_df, peak_type='peak', name=args.name, out_dir=args.o, sort_by=args.sort_by)
+    fseq2.narrowPeak_writer(result_df=result_df, peak_type='peak', name=args.name, out_dir=args.o, sort_by=args.sort_by,
+                            standard_narrowpeak=args.standard_narrowpeak)
 
     if args.sig_format:
         fseq2.output_sig(sig_format=args.sig_format, treatment_np_tmp_name=treatment_np_tmp_name,

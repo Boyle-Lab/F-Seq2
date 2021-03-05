@@ -6,7 +6,7 @@
 
 __author__ = 'Nanxiang(Samuel) Zhao'
 __email__ = 'samzhao@umich.edu'
-__version__ = '2.0.2'
+__version__ = '2.0.3'
 
 import functools
 import math
@@ -179,7 +179,9 @@ def calculate_threshold(size, ncuts, std, std_p, bandwidth):
     window_size = int(window_size - 1)
 
     total_window = 1 + window_size * 2
-    cut_density = int((ncuts / size) * total_window)
+    if ncuts == 0:
+        sys.exit('Error: No reads contained in input file(s).')
+    cut_density = max(int((ncuts / size) * total_window), 1)
     threshold_iterations = 10000
 
     np.random.seed(934) # may not need it
@@ -1006,7 +1008,7 @@ def output_sig(sig_format, treatment_np_tmp_name, out_dir, out_name, chr_size_di
 
 
 def narrowPeak_writer(result_df, peak_type, name, out_dir, prior_pad_summit=0, score_method_for_peaks='max',
-                      sort_by='pValue'):
+                      sort_by='pValue', standard_narrowpeak=False):
     """Write summits or peaks in narrowPeak Format.
     Format Info: https://genome.ucsc.edu/FAQ/FAQformat.html
 
@@ -1047,34 +1049,51 @@ def narrowPeak_writer(result_df, peak_type, name, out_dir, prior_pad_summit=0, s
 
     elif peak_type == 'peak':
 
+        if result_df.empty:
+            result_df.to_csv(f'{out_dir}/{name}_peaks.narrowPeak', sep='\t', header=None, index=None)
+            return
+
         result_df = result_df.loc[:,
                     ['chrom', 'start', 'end', 'query_value', '-log10_p_value_interpolated', 'q_value', 'summit']]
 
-        result_df.sort_values(['chrom', 'start'], inplace=True)
         result_df['summit'] = result_df['summit'] - result_df['start']
-        try:
+
+        if standard_narrowpeak:
+            result_df = result_df.sort_values(['-log10_p_value_interpolated'], ascending=False).drop_duplicates(
+                ['chrom', 'start', 'end'])
+
+            if sort_by == 'chromAndStart':
+                result_df.sort_values(['chrom', 'start'], inplace=True)
+
+            result_df['assigned_name'] = [name + '_peak_' + str(i) for i in range(result_df.shape[0])]
+            result_df['assigned_strand'] = '.'
+            result_df['score'] = (result_df['-log10_p_value_interpolated'] * 10).astype(int)
+
+            result_df[['chrom', 'start', 'end', 'assigned_name', 'score', 'assigned_strand',
+                       'query_value', '-log10_p_value_interpolated', 'q_value', 'summit']].to_csv(f'{out_dir}/{name}_peaks.narrowPeak',
+                                                                            sep='\t',
+                                                                            header=None, index=None)
+
+        else:
+            result_df.sort_values(['chrom', 'start'], inplace=True)
             result_df = pybedtools.BedTool.from_dataframe(result_df).merge(c=[5, 4, 5, 6, 7],
                                                                            o=[score_method_for_peaks, 'collapse',
                                                                               'collapse', 'collapse',
                                                                               'collapse']).to_dataframe()
-        except:
-            if result_df.empty:
-                result_df.to_csv(f'{out_dir}/{name}_peaks.narrowPeak', sep='\t', header=None, index=None)
-                return
 
-        if sort_by == 'pValue':
-            result_df.sort_values(['name'], ascending=False, inplace=True)
-            # result_df.sort_values(['strand'], ascending=False, inplace=True)
-        elif sort_by == 'chromAndStart':
-            result_df.sort_values(['chrom', 'start'], inplace=True)
+            if sort_by == 'pValue':
+                result_df.sort_values(['name'], ascending=False, inplace=True)
+                # result_df.sort_values(['strand'], ascending=False, inplace=True)
+            elif sort_by == 'chromAndStart':
+                result_df.sort_values(['chrom', 'start'], inplace=True)
 
-        result_df['assigned_name'] = [name + '_peak_' + str(i) for i in range(result_df.shape[0])]
-        result_df['assigned_strand'] = '.'
-        result_df['name'] = (result_df['name'] * 10).astype(int)
+            result_df['assigned_name'] = [name + '_peak_' + str(i) for i in range(result_df.shape[0])]
+            result_df['assigned_strand'] = '.'
+            result_df['name'] = (result_df['name'] * 10).astype(int)
 
-        result_df[['chrom', 'start', 'end', 'assigned_name', 'name', 'assigned_strand',
-                   'score', 'strand', 'thickStart', 'thickEnd']].to_csv(f'{out_dir}/{name}_peaks.narrowPeak', sep='\t',
-                                                                        header=None, index=None)
+            result_df[['chrom', 'start', 'end', 'assigned_name', 'name', 'assigned_strand',
+                       'score', 'strand', 'thickStart', 'thickEnd']].to_csv(f'{out_dir}/{name}_peaks.narrowPeak', sep='\t',
+                                                                            header=None, index=None)
 
     return
 
