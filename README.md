@@ -27,6 +27,8 @@ power of the local test and the KDE, which model the read probability distributi
 account for local biases and solve ties that occur when ranking candidate summits, making results suitable for 
 irreproducible discovery rate (IDR) analysis.
 
+## Citation:
+Zhano, N. & Boyle, A.P. TF-Seq2: improving the feature density based peak caller with dynamic statistics. NAR Genom Bioinform. 2021 Feb 23;3(1):lqab012. https://doi.org/10.1093/nargab/lqab012
 
 ## Table of contents
 
