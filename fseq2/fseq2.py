@@ -206,7 +206,9 @@ def run_kde(cuts_array, start_array, end_array, strand_array,
     """Run kde with control.
     """
     start_time = time.time()
-
+    if cuts_array.size == 0:
+        print(f'No data for {chrom} - continuing')
+        return
 
     ### 1. run kde for input ###
     kdepy_result, first_cut, num_cuts = calculate_kde(cuts_array=cuts_array, start_array=start_array,
@@ -327,6 +329,9 @@ def run_kde_wo_control(cuts_array, start_array, end_array, strand_array, chrom, 
     """
     start_time = time.time()
 
+    if cuts_array.size == 0:
+        print(f'No data for {chrom} - continuing')
+        return
 
     ### 1. run kde for input ###
     kdepy_result, first_cut, num_cuts = calculate_kde(cuts_array=cuts_array, start_array=start_array,
@@ -523,7 +528,7 @@ def call_peaks(chrom, first_cut, kdepy_result, min_height, peak_region_threshold
     try:
         peak_regions = find_contiguous_regions(kdepy_result >= peak_region_threshold)
     except IndexError:
-        print(f'no peaks find on {chrom}')
+        print(f'no peaks found on {chrom}')
         return pd.DataFrame()
     peak_indexes, properties = find_peaks(kdepy_result, height=min_height, distance=min_distance,
                                           prominence=min_prominence)
@@ -901,7 +906,7 @@ def calculate_q_value(result_df, p_thr, q_thr, num_peaks):
     :param num_peak:
     :return:
     """
-    result_df['p_value'] = 10**(-result_df['-log10_p_value_interpolated'])
+    result_df['p_value'] = np.power(np.repeat(10,result_df.shape[0]),-result_df['-log10_p_value_interpolated'])
     result_df.sort_values(['p_value'], ascending=True, inplace=True)
     result_df['q_value'] = -np.log10(multipletests(pvals=result_df['p_value'], method='fdr_bh', is_sorted=True)[1])
 
@@ -954,11 +959,32 @@ def read_chrom_size_file(file_name):
 
     return chr_size_dic
 
+def gaussian_kernel1d(sigma, order, radius):
+    if order < 0:
+        raise ValueError('orde must be non-negative')
+    exponent_range = np.arange(order + 1)
+    sigma2 = sigma * sigma
+    x = np.arange(-radius, radius+1)
+    phi_x = np.exp(-0.5 / sigma2 * x ** 2)
+    phi_x = phi_x / phi_x.sum()
+
+    if order==0:
+        return phi_x
+    else:
+        q = np.zeros(order + 1)
+        q[0] = 1
+        D = np.diag(exponent_range[1:], 1)
+        P = np.diag(np.ones(order)/-sigma2, -1)
+        Q_deriv = D + P
+        for _ in range(order):
+            q = Q_deriv.dot(q)
+        q = (x[:, None] ** exponent_range).dot(q)
+        return q * phi_x
 
 def gaussian_kernel_fft(sig, sigma):
     lw = int(4 * sigma + 0.5)
 
-    return fftconvolve(sig, filters._gaussian_kernel1d(sigma, 0, lw), mode='same')
+    return fftconvolve(sig, gaussian_kernel1d(sigma, 0, lw), mode='same')
 
 
 def output_sig(sig_format, treatment_np_tmp_name, out_dir, out_name, chr_size_dic, sig_float_precision, gaussian_smooth_sigma=False):
