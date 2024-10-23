@@ -4,7 +4,7 @@ Binary installers for the latest released version are available at the [python p
 The source code is currently hosted on GitHub at: https://github.com/Boyle-Lab/F-Seq2
 
 ### Prerequisites
-- python >= 3.6
+- python >= 3.9
 - [bedtools](https://bedtools.readthedocs.io/en/latest/content/installation.html) >= 2.29.0 (required by pybedtools)
 
 
@@ -34,22 +34,22 @@ $ unzip master.zip
 $ cd F-Seq2-master
 
 # install all dependencies listed below
-
-$ python setup.py install
+$ pip install numpy==1.26.4
+$ pip install .
 ```
 
 ### Integration test
 ```
 $ cd Fseq2
 
-$ python setup.py test
+$ pytest
 ```
 This may take 1 min
 
 
 ### Packages installed after installation
 
-- numpy >= 1.15.4
+- numpy == 1.26.4
 - scipy >= 1.1.0
 - pandas >= 0.24
 - statsmodels
@@ -58,3 +58,4 @@ This may take 1 min
 - pyBigWig
 - h5py
 - matplotlib
+- cython
