@@ -6,7 +6,7 @@
 
 __author__ = 'Nanxiang(Samuel) Zhao'
 __email__ = 'samzhao@umich.edu'
-__version__ = '2.0.3'
+__version__ = '2.0.4'
 
 import functools
 import math
