@@ -21,8 +21,8 @@ def readme():
 with open('HISTORY.rst') as history_file:
     history = history_file.read()
 
-requirements = ['numpy >= 1.15.4', 'scipy >= 1.1.0', 'pandas >= 0.24', 'statsmodels',
-                'KDEpy', 'pybedtools', 'pyBigWig', 'h5py', 'matplotlib']
+requirements = ['numpy < 2.0', 'scipy >= 1.1.0', 'pandas >= 0.24', 'statsmodels',
+                'KDEpy', 'pybedtools', 'pyBigWig', 'h5py', 'matplotlib', 'cython']
 
 setup_requirements = ['pytest-runner']
 
@@ -45,15 +45,16 @@ except ImportError:
 setup(
     author="Nanxiang Zhao (Samuel)",
     author_email='samzhao@umich.edu',
-    python_requires='>=3.6',
+    python_requires='>=3.9',
     classifiers=[
         'Development Status :: 3 - Alpha',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
         'Natural Language :: English',
-        'Programming Language :: Python :: 3.6',
-        'Programming Language :: Python :: 3.7',
-        'Programming Language :: Python :: 3.8',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
     ],
     description="Improving the feature density based peak caller with dynamic statistics.",
     long_description=readme(),
@@ -69,7 +70,7 @@ setup(
     test_suite='tests',
     tests_require=test_requirements,
     url='https://github.com/Boyle-Lab/F-Seq2',
-    version='2.0.3',
+    version='2.0.4',
     zip_safe=False,
     ext_modules = extensions
 )

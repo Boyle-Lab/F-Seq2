@@ -549,7 +549,7 @@ def call_peaks(chrom, first_cut, kdepy_result, min_height, peak_region_threshold
         peak_regions = peak_regions.intersect(peak_indexes, wa=True, wb=True).merge(c=[5, 7, 8], o='collapse',
                                                                                     d=merge_peak_distance).to_dataframe()
     except pybedtools.helpers.BEDToolsError:
-        print(f'no peaks find on {chrom}')
+        print(f'no peaks found on {chrom}')
         return pd.DataFrame()
 
     peak_regions = peak_regions[peak_regions['end'] - peak_regions['start'] >= min_peak_len].copy()
