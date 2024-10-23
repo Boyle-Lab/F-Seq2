@@ -27,7 +27,7 @@ $ conda install -c bioconda -c dmentipl -c samzhao fseq2
 ### Install from source
 
 ```
-$ wget https://github.com/Boyle-Lab/F-Seq2/archive/master.zip
+$ wget https://github.com/Boyle-Lab/F-Seq2/archive/refs/tags/v2.0.4.zip
 
 $ unzip master.zip
 
