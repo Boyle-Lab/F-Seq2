@@ -5,7 +5,6 @@
 from setuptools import setup, find_packages, Extension
 import sys
 from pathlib import Path
-import numpy
 
 # with open('README.rst') as readme_file:
 #     readme = readme_file.read()
@@ -30,12 +29,14 @@ test_requirements = ['pytest>=3']
 
 try:
     from Cython.Build import cythonize
+    import numpy
     extensions = cythonize([
         Extension("fseq2.idr_2_0_3.inv_cdf",
                   ["fseq2/idr_2_0_3/inv_cdf.pyx", ],
                   include_dirs=[numpy.get_include()]),
     ])
 except ImportError:
+    import numpy
     extensions = [
         Extension("fseq2.idr_2_0_3.inv_cdf",
                   ["fseq2/idr_2_0_3/inv_cdf.c", ],
