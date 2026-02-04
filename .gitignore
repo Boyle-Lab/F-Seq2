@@ -1,0 +1,7 @@
+.venv/
+scratch/
+__pycache__/
+bin/
+*h5
+inv_cdf*
+fseq2/idr_2_0_3/inv_cdf.c

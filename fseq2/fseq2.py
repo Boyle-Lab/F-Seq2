@@ -9,6 +9,7 @@ __email__ = 'samzhao@umich.edu'
 __version__ = '2.0.4'
 
 import functools
+import json
 import math
 import os
 import sys
@@ -250,20 +251,18 @@ def run_kde(cuts_array, start_array, end_array, strand_array,
             with h5py.File(params.treatment_np_tmp_name, mode='a', libver='latest') as sig_file:
                 try:
                     sig_file.create_dataset(chrom,
-                                            data=np.round(np.divide(kdepy_result,
+                                            data=np.divide(kdepy_result,
                                                            kdepy_result_control, out=np.zeros_like(kdepy_result),
-                                                           where=kdepy_result_control>lambda_bg_lower_bound_ind),
-                                                          params.sig_float_precision).astype(np.float16),
-                                            dtype='f2')#, compression='gzip')
+                                                           where=kdepy_result_control>lambda_bg_lower_bound_ind).astype(np.float32),
+                                            dtype='f4')#, compression='gzip')
                     sig_file.attrs[chrom] = first_cut
                 except RuntimeError:
                     del sig_file[chrom]
                     sig_file.create_dataset(chrom,
-                                            data=np.round(np.divide(kdepy_result,
+                                            data=np.divide(kdepy_result,
                                                            kdepy_result_control, out=np.zeros_like(kdepy_result),
-                                                           where=kdepy_result_control>lambda_bg_lower_bound_ind),
-                                                          params.sig_float_precision).astype(np.float16),
-                                            dtype='f2')#, compression='gzip')
+                                                           where=kdepy_result_control>lambda_bg_lower_bound_ind).astype(np.float32),
+                                            dtype='f4')#, compression='gzip')
                     sig_file.attrs[chrom] = first_cut
 
         # 2. calculate lambda_bg which needs all control signal in memory
@@ -377,14 +376,14 @@ def run_kde_wo_control(cuts_array, start_array, end_array, strand_array, chrom, 
             with h5py.File(params.treatment_np_tmp_name, mode='a', libver='latest') as sig_file:
                 try:
                     sig_file.create_dataset(chrom,
-                                            data=np.round(kdepy_result, params.sig_float_precision).astype(np.float16),
-                                            dtype='f2')#, compression='gzip')
+                                            data=kdepy_result,
+                                            dtype='f4')#, compression='gzip')
                     sig_file.attrs[chrom] = first_cut
                 except RuntimeError:
                     del sig_file[chrom]
                     sig_file.create_dataset(chrom,
-                                            data=np.round(kdepy_result, params.sig_float_precision).astype(np.float16),
-                                            dtype='f2')#, compression='gzip')
+                                            data=kdepy_result,
+                                            dtype='f4')#, compression='gzip')
                     sig_file.attrs[chrom] = first_cut
 
 
@@ -987,7 +986,8 @@ def gaussian_kernel_fft(sig, sigma):
     return fftconvolve(sig, gaussian_kernel1d(sigma, 0, lw), mode='same')
 
 
-def output_sig(sig_format, treatment_np_tmp_name, out_dir, out_name, chr_size_dic, sig_float_precision, gaussian_smooth_sigma=False):
+def output_sig(sig_format, treatment_np_tmp_name, out_dir, out_name, chr_size_dic, sig_float_precision,
+               gaussian_smooth_sigma=False, memmap_out_dir=None):
 
     #start_time = time.time()
 
@@ -1021,11 +1021,56 @@ def output_sig(sig_format, treatment_np_tmp_name, out_dir, out_name, chr_size_di
                                              step=1)
                 else:
                     for chrom_line in chrom_line_ls:
-                        #kdepy_result = sig_file[chrom_line][:].astype(np.float64)
-                        kdepy_result = np.round(sig_file[chrom_line][:], sig_float_precision).astype(np.float16)
-                        #kdepy_result[kdepy_result == 0] = np.NaN
+                        kdepy_result = sig_file[chrom_line][:].astype(np.float64)
+                        #kdepy_result = np.round(sig_file[chrom_line][:], sig_float_precision).astype(np.float16)
+                        kdepy_result[kdepy_result == 0] = np.NaN
                         output_bw.addEntries(chrom_line, int(sig_file.attrs[chrom_line]), values=kdepy_result, span=1,
                                              step=1)
+        elif sig_format == 'memmap_np':
+            # Create output directory for memory-mapped numpy files
+            os.makedirs(memmap_out_dir, exist_ok=True)
+
+            # Build metadata dictionary with chromosome info and parameters
+            metadata = {
+                'chromosomes': {},
+                'parameters': {}
+            }
+
+            # Copy parameters from HDF5 attributes
+            param_keys = ['threshold', 'peak_region_threshold', 'min_distance', 'min_prominence',
+                          'window_size', 'lambda_bg_lower_bound', 'bandwidth', 'fragment_offset',
+                          'scaling_factor', 'fragment_size', 'feature_length', 'ncuts', 'sparse_data',
+                          'has_control', 'bandwidth_control', 'fragment_offset_control', 'ncuts_control']
+            for key in param_keys:
+                if key in sig_file.attrs:
+                    val = sig_file.attrs[key]
+                    # Convert numpy types to Python types for JSON serialization
+                    if isinstance(val, (np.integer, np.floating)):
+                        val = val.item()
+                    elif isinstance(val, np.bool_):
+                        val = bool(val)
+                    metadata['parameters'][key] = val
+
+            # Write individual .npy files for each chromosome
+            for chrom_line in chrom_line_ls:
+                signal_array = sig_file[chrom_line][:].astype(np.float32)
+                first_cut = int(sig_file.attrs[chrom_line])
+
+                # Save as .npy file
+                npy_path = f'{memmap_out_dir}/{chrom_line}.npy'
+                np.save(npy_path, signal_array)
+
+                # Store chromosome metadata
+                metadata['chromosomes'][chrom_line] = {
+                    'first_cut': first_cut,
+                    'length': len(signal_array),
+                    'file': f'{chrom_line}.npy'
+                }
+
+            # Write metadata JSON
+            metadata_path = f'{memmap_out_dir}/metadata.json'
+            with open(metadata_path, 'w') as f:
+                json.dump(metadata, f, indent=2)
 
     #end_time = time.time()
     #print(f'time = {end_time-start_time:.3f} seconds.')
